@@ -1,0 +1,67 @@
+:root {
+  font-family: 'Fira Mono', 'IBM Plex Mono', 'Menlo', monospace;
+  color-scheme: light;
+  color: #181818;
+  background-color: #e5e5e5;
+}
+
+a {
+  color: #b6ff00;
+  text-decoration: underline dotted #b6ff00;
+  font-size: 12px;
+  font-family: 'Fira Mono', 'IBM Plex Mono', 'Menlo', monospace;
+}
+a:hover {
+  color: #181818;
+  background: #b6ff00;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: #e5e5e5;
+  color: #181818;
+  font-family: 'Fira Mono', 'IBM Plex Mono', 'Menlo', monospace;
+  font-size: 13px;
+}
+
+h1 {
+  font-size: 1.5em;
+  line-height: 1.1;
+  color: #181818;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+button {
+  border-radius: 0;
+  border: 2px solid #181818;
+  background-color: #b6ff00;
+  color: #181818;
+  font-family: 'Fira Mono', 'IBM Plex Mono', 'Menlo', monospace;
+  font-size: 12px;
+  font-weight: bold;
+  box-shadow: 0 0 8px 1px #b6ff00aa;
+  transition: background 0.2s, color 0.2s;
+}
+button:hover {
+  background: #181818;
+  color: #b6ff00;
+  border-color: #b6ff00;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color: #181818;
+    background-color: #e5e5e5;
+  }
+  a:hover {
+    color: #181818;
+    background: #b6ff00;
+  }
+  button {
+    background-color: #b6ff00;
+    color: #181818;
+  }
+}

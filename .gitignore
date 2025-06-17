@@ -1,0 +1,41 @@
+# .gitignore for sensitive files and common patterns
+# Exclude API keys, secrets, and sensitive config
+*.env
+*.env.*
+.envrc
+.env.local
+.env.*.local
+*.secret*
+*apikey*
+*api_key*
+*API_KEY*
+*token*
+*Token*
+*TOKEN*
+*.pem
+*.crt
+*.key
+
+# Node modules and build output
+node_modules/
+dist/
+build/
+
+# MacOS system files
+.DS_Store
+
+# Log files
+*.log
+
+# VSCode settings
+.vscode/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Ignore session and temp files
+sessions/*.json
+Documents/CONVO_*.md
+Documents/PRD_*.md
+Documents/PRD_draft.md
