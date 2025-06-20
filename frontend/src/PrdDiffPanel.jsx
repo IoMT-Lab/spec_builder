@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import DiffViewer, { DiffMethod } from 'react-diff-viewer';
+import { diffLines } from 'diff';
 import './App.css';
 
 // Helper to split text into lines
@@ -10,8 +11,7 @@ function splitLines(text) {
 // Helper to compute a unified diff (returns array of {type, oldLine, newLine, value})
 function computeUnifiedDiff(oldLines, newLines) {
   // Simple line-by-line diff (replace with a real diff algorithm for production)
-  const JsDiff = require('diff');
-  const diff = JsDiff.diffLines(oldLines.join('\n'), newLines.join('\n'));
+  const diff = diffLines(oldLines.join('\n'), newLines.join('\n'));
   const result = [];
   let oldLineNum = 0, newLineNum = 0;
   diff.forEach(part => {
@@ -123,7 +123,11 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave }) => {
             return (
               <div key={idx} style={{ display: 'flex', alignItems: 'center', background: bg }}>
                 <span style={{ width: 40, color: '#888', userSelect: 'none' }}>{lineNum}</span>
-                <span style={{ color: textColor, whiteSpace: 'pre-wrap', flex: 1 }}>{d.value}</span>
+                {mergedLines[idx] !== null ? (
+                  <span style={{ color: textColor, whiteSpace: 'pre-wrap', flex: 1 }}>{mergedLines[idx]}</span>
+                ) : (
+                  <span style={{ color: '#bbb', fontStyle: 'italic', flex: 1 }}>[removed]</span>
+                )}
                 {d.type !== 'unchanged' && (
                   <span style={{ marginLeft: 8 }}>
                     <button

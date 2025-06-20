@@ -131,8 +131,8 @@ function App() {
         body: JSON.stringify({ role: 'assistant', content: data.reply })
       });
     }
-    // If LLM returned a new PRD draft, trigger diff refresh
-    if (data.prdDraft) setPrdDiffRefreshKey(k => k + 1);
+    // Always trigger PRD diff refresh after every LLM response
+    setPrdDiffRefreshKey(k => k + 1);
     // Re-fetch session to update conversation
     const sessionRes = await fetch(`/api/sessions/${currentSession.id}`);
     const sessionData = await sessionRes.json();
