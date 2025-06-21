@@ -151,7 +151,7 @@ function App() {
     setApiCheckLoading(true);
     setApiCheckResult('');
     try {
-      const res = await fetch('/api/llm/check', {
+      const res = await fetch('http://localhost:4000/api/llm/check', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ llm: llmProvider }),

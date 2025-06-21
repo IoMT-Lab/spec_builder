@@ -15,9 +15,12 @@ services:
     networks:
       - react-express
     expose:
-      - 3000
+      - 4000
+    ports:
+      - 4000:4000
     environment:
       - OPENAI_API_KEY="your key here"
+      - PORT=4000
 
 networks:
   react-express:

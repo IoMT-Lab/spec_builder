@@ -7,12 +7,14 @@ require('dotenv').config();
 const runLLMScript = require('./runLLMScript');
 const { PRD_SECTIONS, QUESTION_TEMPLATES } = require('./prdConfig');
 const { createSession, getSession, updateSession } = require('./prdSessionStore');
+const cors = require("cors");
 
 const openaiApiKey = process.env.OPENAI_API_KEY;
 const geminiApiKey = process.env.GEMINI_API_KEY;
 
 const app = express();
 app.use(express.json());
+app.use(cors());
 
 // Log server start
 console.log('Backend server starting...');
