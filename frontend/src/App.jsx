@@ -8,6 +8,8 @@ import PrdDiffPanel from './PrdDiffPanel.jsx';
 function App() {
   console.log('App component rendered');
 
+  const BASE_URL="http://localhost:4000"
+
   const [expandedPanel, setExpandedPanel] = useState(null);
   const [llmProvider, setLlmProvider] = useState('openai');
   const [apiCheckResult, setApiCheckResult] = useState('');
@@ -42,7 +44,7 @@ function App() {
   // Fetch sessions from backend
   const fetchSessions = async () => {
     try {
-      const res = await fetch('/api/sessions');
+      const res = await fetch(`${BASE_URL}/api/sessions`);
       const data = await res.json();
       setSessions(data);
       // If currentSession is missing or deleted, select the first available
@@ -78,7 +80,7 @@ function App() {
   // Fetch conversation for current session
   useEffect(() => {
     if (currentSession) {
-      fetch(`/api/sessions/${currentSession.id}`)
+      fetch(`${BASE_URL}/api/sessions/${currentSession.id}`)
         .then(res => res.json())
         .then(session => setConversation(session.conversation || []))
         .catch(() => setConversation([]));
@@ -107,13 +109,13 @@ function App() {
     if (!userInput.trim() || !currentSession) return;
     setLoading(true);
     // Add user message to backend
-    await fetch(`/api/sessions/${currentSession.id}/message`, {
+    await fetch(`${BASE_URL}/api/sessions/${currentSession.id}/message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ role: 'user', content: userInput })
     });
     // Call LLM endpoint
-    const res = await fetch('/api/llm', {
+    const res = await fetch(`${BASE_URL}/api/llm`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -125,7 +127,7 @@ function App() {
     const data = await res.json();
     // Add assistant message to backend
     if (data.reply) {
-      await fetch(`/api/sessions/${currentSession.id}/message`, {
+      await fetch(`${BASE_URL}/api/sessions/${currentSession.id}/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: 'assistant', content: data.reply })
@@ -134,7 +136,7 @@ function App() {
     // Always trigger PRD diff refresh after every LLM response
     setPrdDiffRefreshKey(k => k + 1);
     // Re-fetch session to update conversation
-    const sessionRes = await fetch(`/api/sessions/${currentSession.id}`);
+    const sessionRes = await fetch(`${BASE_URL}/api/sessions/${currentSession.id}`);
     const sessionData = await sessionRes.json();
     setConversation(sessionData.conversation || []);
     setUserInput('');
@@ -151,7 +153,7 @@ function App() {
     setApiCheckLoading(true);
     setApiCheckResult('');
     try {
-      const res = await fetch('http://localhost:4000/api/llm/check', {
+      const res = await fetch(`${BASE_URL}/api/llm/check`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ llm: llmProvider }),
@@ -172,7 +174,7 @@ function App() {
   const handleNewSession = async () => {
     const title = prompt('Enter a title for the new session:');
     if (!title) return;
-    const res = await fetch('/api/sessions', {
+    const res = await fetch(`${BASE_URL}/api/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title }),
@@ -194,7 +196,7 @@ function App() {
     let sessionAvailable = false;
     for (let i = 0; i < 5; i++) {
       try {
-        const checkRes = await fetch(`/api/sessions/${newSession.id}`);
+        const checkRes = await fetch(`${BASE_URL}/api/sessions/${newSession.id}`);
         if (checkRes.ok) {
           sessionAvailable = true;
           break;
@@ -209,7 +211,7 @@ function App() {
     }
 
     // Trigger initial assistant message for new session
-    const llmRes = await fetch('/api/llm', {
+    const llmRes = await fetch(`${BASE_URL}/api/llm`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -221,7 +223,7 @@ function App() {
     const llmData = await llmRes.json();
     const initialReply = llmData.reply || (llmData.error ? `Error: ${llmData.error}` : 'No reply');
     if (llmData.error) setErrorMsg(llmData.error + (llmData.details ? `\n${llmData.details.stderr || llmData.details}` : ''));
-    await fetch(`/api/sessions/${newSession.id}/message`, {
+    await fetch(`${BASE_URL}/api/sessions/${newSession.id}/message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ role: 'assistant', content: initialReply }),
@@ -234,7 +236,7 @@ function App() {
     setLoading(true);
     setErrorMsg("");
     try {
-      const res = await fetch('/api/prd/start', {
+      const res = await fetch(`${BASE_URL}/api/prd/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ projectDescription, industryDomain, projectType })
@@ -262,7 +264,7 @@ function App() {
     setErrorMsg("");
     setConversation(prev => [...prev, { role: 'user', content: userInput }]);
     try {
-      const res = await fetch('/api/prd/answer', {
+      const res = await fetch(`${BASE_URL}/api/prd/answer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId: prdSessionId, section: prdStep.section, field: prdStep.field, answer: userInput })
