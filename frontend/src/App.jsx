@@ -45,6 +45,7 @@ function App() {
   // Add refresh keys to trigger PRD diff and markdown refresh
   const [prdDiffRefreshKey, setPrdDiffRefreshKey] = useState(0);
   const [markdownRefreshKey, setMarkdownRefreshKey] = useState(0);
+  const [hasPendingChanges, setHasPendingChanges] = useState(false);
 
   useEffect(() => {
     if (menuBarRef.current) {
@@ -497,11 +498,34 @@ function App() {
               </section>
               <div className="markdown-panel">
                 <div className="markdown-panel-content">
-                  {/* Show PRD diff panel if a temp draft exists */}
-                  {currentSession && (
-                    <PrdDiffPanel sessionId={currentSession.id} refreshKey={prdDiffRefreshKey} onSave={handlePrdSave} />
+                  {/* Single-display rule: show either review (diff) or the main Markdown */}
+                  {currentSession && hasPendingChanges ? (
+                    <PrdDiffPanel
+                      sessionId={currentSession.id}
+                      refreshKey={prdDiffRefreshKey}
+                      onSave={handlePrdSave}
+                      onDiffStateChange={setHasPendingChanges}
+                    />
+                  ) : (
+                    <>
+                      {/* Mount a hidden diff panel to detect pending changes without showing it */}
+                      {currentSession && (
+                        <div style={{ display: 'none' }}>
+                          <PrdDiffPanel
+                            sessionId={currentSession.id}
+                            refreshKey={prdDiffRefreshKey}
+                            onSave={handlePrdSave}
+                            onDiffStateChange={setHasPendingChanges}
+                          />
+                        </div>
+                      )}
+                      <MarkdownPanel
+                        sessionId={currentSession ? currentSession.id : null}
+                        onSave={handlePrdSave}
+                        refreshKey={markdownRefreshKey}
+                      />
+                    </>
                   )}
-                  <MarkdownPanel sessionId={currentSession ? currentSession.id : null} onSave={handlePrdSave} refreshKey={markdownRefreshKey} />
                 </div>
               </div>
             </div>

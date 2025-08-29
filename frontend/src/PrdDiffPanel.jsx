@@ -36,7 +36,7 @@ function computeUnifiedDiff(oldLines, newLines) {
   return result;
 }
 
-const PrdDiffPanel = ({ sessionId, refreshKey, onSave }) => {
+const PrdDiffPanel = ({ sessionId, refreshKey, onSave, onDiffStateChange }) => {
   // Left (working) and right (proposal) texts as arrays of lines
   const [leftLines, setLeftLines] = useState([]);
   const [rightLines, setRightLines] = useState([]);
@@ -79,10 +79,15 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave }) => {
     return () => { cancelled = true; };
   }, [sessionId, refreshKey]);
 
-  // Recompute diff whenever left/right change
+  // Recompute diff whenever left/right change and notify parent (only after load completes)
   useEffect(() => {
-    setDiff(computeUnifiedDiff(leftLines, rightLines));
-  }, [leftLines, rightLines]);
+    const next = computeUnifiedDiff(leftLines, rightLines);
+    setDiff(next);
+    if (!loading && typeof onDiffStateChange === 'function') {
+      const has = next.some(d => d.type !== 'unchanged');
+      onDiffStateChange(has);
+    }
+  }, [leftLines, rightLines, loading]);
 
   const canUndo = history.length > 0;
   const hasChanges = useMemo(() => diff.some(d => d.type !== 'unchanged'), [diff]);
@@ -250,9 +255,15 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave }) => {
       .catch(e => { setError('Failed to save'); setSaving(false); });
   };
 
-  if (loading) return <div>Loading PRD diff...</div>;
-  if (error) return <div style={{ color: 'red' }}>{error}</div>;
-  if (!hasChanges) return null; // Hide panel when there are no differences
+  if (loading) {
+    return <div>Loading PRD diff...</div>;
+  }
+  if (error) {
+    return <div style={{ color: 'red' }}>{error}</div>;
+  }
+  if (!hasChanges) {
+    return null; // Hide panel when there are no differences
+  }
 
   return (
     <div className="prd-diff-panel">

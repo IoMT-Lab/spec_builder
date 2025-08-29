@@ -17,6 +17,148 @@ app.use(express.json());
 // Log server start
 console.log('Backend server starting...');
 
+// Consistent system prompt for chat replies (keeps assistant on-brief)
+const REPLY_SYSTEM_PROMPT = (
+  'You are an expert product manager and technical writer helping a user shape a PRD via conversation. ' +
+  'Keep replies brief and actionable (2–5 sentences). Ask one focused question when key information is missing. ' +
+  'Do not invent facts. Do not paste the entire PRD in chat replies; propose changes concisely and rely on the PRD draft process. '
+);
+
+// --- Conversation structure controls ---
+const MAX_DEEP_DIVE_DEPTH = 2;
+const MAX_TURNS_PER_FOCUS = 2;
+const MAX_CONSECUTIVE_DIGRESSIONS = 2;
+const MIN_CONTENT_LENGTH = 40; // characters threshold between weak and covered
+
+// Parse PRD markdown into coverage map using PRD_SECTIONS
+function parsePrdCoverage(prdMarkdown) {
+  const lines = String(prdMarkdown || '').split(/\r?\n/);
+  const sections = PRD_SECTIONS.map(s => ({ name: s.name, fields: { } }));
+  // Build index of section headers
+  const secIndex = new Map(PRD_SECTIONS.map((s, i) => [s.name, i]));
+  let currentSectionIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const lh = lines[i].trim();
+    // Match headings: ## Section Name
+    const mHead = /^##\s+(.+?)\s*$/.exec(lh);
+    if (mHead) {
+      const idx = secIndex.has(mHead[1]) ? secIndex.get(mHead[1]) : -1;
+      if (idx !== -1) currentSectionIdx = idx;
+      continue;
+    }
+    // Match field bullets: - **Field:** value
+    if (currentSectionIdx >= 0) {
+      const mField = /^[-*]\s+\*\*(.+?)\s*:\*\*\s*(.*)$/.exec(lh);
+      if (mField) {
+        const fieldName = mField[1].trim();
+        const value = (mField[2] || '').trim();
+        sections[currentSectionIdx].fields[fieldName] = value;
+      }
+    }
+  }
+  // Compute status per configured field
+  const coverage = sections.map((s, idx) => {
+    const cfgFields = PRD_SECTIONS[idx].fields;
+    const fields = {};
+    cfgFields.forEach(f => {
+      const val = s.fields[f];
+      let status = 'missing';
+      if (typeof val === 'string' && val.length > 0 && val !== '[MISSING]') {
+        status = val.replace(/\*\*/g, '').trim().length >= MIN_CONTENT_LENGTH ? 'covered' : 'weak';
+      }
+      fields[f] = { status, value: val || '' };
+    });
+    return { name: s.name, fields };
+  });
+  return coverage;
+}
+
+function getNextFocus(coverage, cursor) {
+  const totalSections = PRD_SECTIONS.length;
+  let i = cursor?.sectionIndex || 0;
+  let j = cursor?.fieldIndex || 0;
+  // First pass: from cursor onwards
+  for (let si = i; si < totalSections; si++) {
+    const fields = PRD_SECTIONS[si].fields;
+    for (let fj = si === i ? j : 0; fj < fields.length; fj++) {
+      const f = fields[fj];
+      const st = coverage[si]?.fields?.[f]?.status || 'missing';
+      if (st === 'missing') return { sectionIndex: si, fieldIndex: fj, status: st };
+    }
+  }
+  // Second pass: any weak
+  for (let si = 0; si < totalSections; si++) {
+    const fields = PRD_SECTIONS[si].fields;
+    for (let fj = 0; fj < fields.length; fj++) {
+      const f = fields[fj];
+      const st = coverage[si]?.fields?.[f]?.status || 'missing';
+      if (st === 'weak') return { sectionIndex: si, fieldIndex: fj, status: st };
+    }
+  }
+  // Otherwise, stick with cursor (likely done)
+  return { sectionIndex: cursor?.sectionIndex || 0, fieldIndex: cursor?.fieldIndex || 0, status: 'covered' };
+}
+
+function advanceCursor(cursor, coverage) {
+  const next = getNextFocus(coverage, cursor);
+  return { sectionIndex: next.sectionIndex, fieldIndex: next.fieldIndex };
+}
+
+function idxToNames(sectionIndex, fieldIndex) {
+  const section = PRD_SECTIONS[sectionIndex] || PRD_SECTIONS[0];
+  const sectionName = section?.name || '';
+  const fieldName = (section?.fields || [])[fieldIndex] || '';
+  return { sectionName, fieldName };
+}
+
+function detectIntent(text = '') {
+  const t = String(text).toLowerCase();
+  if (/(move on|next section|advance|skip)/.test(t)) return { type: 'advance' };
+  if (/(iso|astm|iec|standard|standards)/.test(t)) return { type: 'standards' };
+  if (/(example|examples|sample)/.test(t)) return { type: 'examples' };
+  if (/(why|how|detail|deeper|explain|more)/.test(t)) return { type: 'deep_dive' };
+  return { type: 'on_topic' };
+}
+
+function pushFocus(session, type, topic) {
+  session.cursor = session.cursor || { sectionIndex: 0, fieldIndex: 0 };
+  session.focusStack = Array.isArray(session.focusStack) ? session.focusStack : [];
+  const depth = session.focusStack.length;
+  if (depth >= MAX_DEEP_DIVE_DEPTH || session.consecutiveDigressions >= MAX_CONSECUTIVE_DIGRESSIONS) return false;
+  session.focusStack.push({ type, topic, turnsLeft: MAX_TURNS_PER_FOCUS, depth });
+  session.consecutiveDigressions = (session.consecutiveDigressions || 0) + 1;
+  return true;
+}
+
+function tickFocus(session) {
+  if (!session.focusStack || session.focusStack.length === 0) {
+    session.consecutiveDigressions = 0;
+    return;
+  }
+  const top = session.focusStack[session.focusStack.length - 1];
+  top.turnsLeft -= 1;
+  if (top.turnsLeft <= 0) {
+    session.focusStack.pop();
+    if (session.focusStack.length === 0) session.consecutiveDigressions = 0;
+  }
+}
+
+function buildStructureSystemMessage({ agenda, nextFocus, cursor, focusStack }) {
+  const { sectionName: curSec, fieldName: curField } = idxToNames(cursor.sectionIndex, cursor.fieldIndex);
+  const { sectionName: nextSec, fieldName: nextField } = idxToNames(nextFocus.sectionIndex, nextFocus.fieldIndex);
+  const focusText = focusStack.length
+    ? `Active focus: ${focusStack[focusStack.length-1].type} on ${focusStack[focusStack.length-1].topic} (turns left: ${focusStack[focusStack.length-1].turnsLeft}). `
+    : '';
+  return (
+    `Agenda (keep headings stable): ${agenda.map(a=>`${a.name} [${a.fields.join(', ')}]`).join(' | ')}. ` +
+    `Current cursor: ${curSec} → ${curField}. ` +
+    `Next focus: ${nextSec} → ${nextField} (${nextFocus.status}). ` +
+    focusText +
+    `Rules: prioritize one focused question per turn; if in a deep dive/examples/standards focus, stay on that for at most ${MAX_TURNS_PER_FOCUS} turns then return to the agenda; ` +
+    `after deep dives, bridge back to the agenda by asking about ${nextField}. Avoid copying the entire PRD in replies.`
+  );
+}
+
 // --- DEBUG: Print absolute path and CWD at startup ---
 console.log('STARTUP DEBUG: Running file:', __filename);
 console.log('STARTUP DEBUG: Current working directory:', process.cwd());
@@ -69,11 +211,45 @@ app.post('/api/llm', async (req, res) => {
   // Always call the LLM script, regardless of state
   try {
     const scriptPath = path.join(__dirname, '..', 'llm', 'conversation_flow.py');
+    // Initialize structure state
+    session.cursor = session.cursor || { sectionIndex: 0, fieldIndex: 0 };
+    session.focusStack = Array.isArray(session.focusStack) ? session.focusStack : [];
+    session.consecutiveDigressions = session.consecutiveDigressions || 0;
+
+    // Compute coverage and next focus from current PRD draft
+    const coveragePre = parsePrdCoverage(session.prdDraft || '');
+    let nextFocus = getNextFocus(coveragePre, session.cursor);
+
+    // Intent routing
+    const intent = detectIntent(userInput);
+    const curNames = idxToNames(session.cursor.sectionIndex, session.cursor.fieldIndex);
+    if (intent.type === 'examples') pushFocus(session, 'examples', curNames.fieldName || curNames.sectionName);
+    else if (intent.type === 'standards') pushFocus(session, 'standards', curNames.fieldName || curNames.sectionName);
+    else if (intent.type === 'deep_dive') pushFocus(session, 'deep_dive', curNames.fieldName || curNames.sectionName);
+    const userRequestedAdvance = intent.type === 'advance';
+
+    // Build structure guidance system message (ephemeral)
+    const agenda = PRD_SECTIONS.map(s => ({ name: s.name, fields: s.fields }));
+    const structureMsg = buildStructureSystemMessage({ agenda, nextFocus, cursor: session.cursor, focusStack: session.focusStack });
+
+    // Prepend system messages (ephemeral) to steer the assistant
+    const replyConversation = [
+      { role: 'system', content: REPLY_SYSTEM_PROMPT },
+      { role: 'system', content: structureMsg },
+      ...session.conversation,
+    ];
     const scriptResult = await runLLMScript(scriptPath, {
       prompt: userInput,
-      conversation: session.conversation,
+      conversation: replyConversation,
       llm,
-      prdDraft: session.prdDraft || ''
+      prdDraft: session.prdDraft || '',
+      structure: {
+        agenda,
+        nextFocus,
+        cursor: session.cursor,
+        focusStack: session.focusStack,
+        limits: { MAX_DEEP_DIVE_DEPTH, MAX_TURNS_PER_FOCUS, MAX_CONSECUTIVE_DIGRESSIONS }
+      }
     });
     // Print whether scriptResult.prdDraft is truthy or not
     console.log('scriptResult.prdDraft is', scriptResult.prdDraft ? 'truthy' : 'falsy', '| Value:', scriptResult.prdDraft);
@@ -91,6 +267,17 @@ app.post('/api/llm', async (req, res) => {
     ) {
       session.prdDraft = scriptResult.prdDraft;
     }
+    // Update structure state after reply
+    const coveragePost = parsePrdCoverage(session.prdDraft || '');
+    const curFieldStatusPre = coveragePre[session.cursor.sectionIndex]?.fields?.[curNames.fieldName]?.status;
+    const curFieldStatusPost = coveragePost[session.cursor.sectionIndex]?.fields?.[curNames.fieldName]?.status;
+    const improved = (curFieldStatusPre !== 'covered') && (curFieldStatusPost === 'covered');
+    if (userRequestedAdvance || improved) {
+      session.cursor = advanceCursor(session.cursor, coveragePost);
+    }
+    // Tick focus budget
+    tickFocus(session);
+
     updateSession(sessionId, session);
     // Update conversation markdown file as well for transparency/export
     if (session.conversationPath) {
@@ -528,7 +715,6 @@ process.on('SIGINT', () => {
   console.log('Received SIGINT');
   process.exit(0);
 });
-
 const PORT = process.env.PORT || 4000;
 
 app.listen(PORT, () => {

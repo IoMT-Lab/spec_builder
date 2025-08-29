@@ -29,6 +29,10 @@ function createSession({ projectDescription, industryDomain = '', projectType = 
     prdPath,
     conversationPath,
     id: sessionId,
+    // Conversation structure control
+    cursor: { sectionIndex: 0, fieldIndex: 0 },
+    focusStack: [], // [{ type, topic, turnsLeft, depth }]
+    consecutiveDigressions: 0,
   };
   // Persist initial session JSON
   try {
