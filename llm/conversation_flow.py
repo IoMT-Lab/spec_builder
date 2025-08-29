@@ -22,6 +22,10 @@ def main():
         llm = data.get('llm', 'gpt-3.5-turbo')
         prev_prd_draft = data.get('prdDraft', '')
         structure = data.get('structure', {})
+        should_draft = bool(data.get('shouldDraft', True))
+        temps = data.get('temps', {})
+        reply_temp = float(temps.get('reply', 0.7))
+        draft_temp = float(temps.get('draft', 0.2))
         # Compose messages for LLM: use provided conversation as-is
         # (Node already appended the user's latest message and prepended a system prompt.)
         messages = conversation
@@ -35,7 +39,7 @@ def main():
         # print('prev_prd_draft:', prev_prd_draft, file=sys.stderr)
         # print('messages:', json.dumps(messages, ensure_ascii=False), file=sys.stderr)
 
-        reply = get_llm_response_from_context(messages, llm)
+        reply = get_llm_response_from_context(messages, llm, temperature=reply_temp)
 
         # Ask LLM to update the PRD draft
         # Integrate structure guidance (agenda, next focus, focus stack) into PRD drafting
@@ -64,10 +68,12 @@ def main():
             f"Conversation history (for context):\n{json.dumps(messages, ensure_ascii=False)}\n\n"
             "Respond ONLY with the full markdown PRD draft."
         )
-        prd_draft = get_llm_response_from_context([
-            {"role": "system", "content": "You are an expert product manager and technical writer."},
-            {"role": "user", "content": prd_prompt}
-        ], llm)
+        prd_draft = None
+        if should_draft:
+            prd_draft = get_llm_response_from_context([
+                {"role": "system", "content": "You are an expert product manager and technical writer."},
+                {"role": "user", "content": prd_prompt}
+            ], llm, temperature=draft_temp)
 
         print(json.dumps({"reply": reply, "prdDraft": prd_draft}))
     except Exception as e:

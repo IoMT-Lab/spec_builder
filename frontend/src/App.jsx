@@ -19,6 +19,7 @@ function App() {
   const [userInput, setUserInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [infoMsg, setInfoMsg] = useState('');
   const menuBarRef = useRef(null);
   const [menuBarRect, setMenuBarRect] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -132,6 +133,11 @@ function App() {
       })
     });
     const data = await res.json();
+    // Subtle toast when no PRD changes were detected
+    if (Object.prototype.hasOwnProperty.call(data, 'hasPrdChanges') && data.hasPrdChanges === false) {
+      setInfoMsg('No PRD changes detected.');
+      setTimeout(() => setInfoMsg(''), 2000);
+    }
     // Always trigger PRD diff refresh after every LLM response
     setPrdDiffRefreshKey(k => k + 1);
     // Re-fetch session to update conversation
@@ -485,6 +491,11 @@ function App() {
                   {errorMsg && (
                     <div style={{ color: 'red', whiteSpace: 'pre-wrap', marginBottom: 12, fontWeight: 500 }}>
                       {errorMsg}
+                    </div>
+                  )}
+                  {infoMsg && (
+                    <div style={{ color: '#2563eb', whiteSpace: 'pre-wrap', marginBottom: 8 }}>
+                      {infoMsg}
                     </div>
                   )}
                   {conversation.length === 0 && !loading && 'LLM Replies go here'}

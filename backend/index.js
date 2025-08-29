@@ -216,8 +216,12 @@ app.post('/api/llm', async (req, res) => {
     session.focusStack = Array.isArray(session.focusStack) ? session.focusStack : [];
     session.consecutiveDigressions = session.consecutiveDigressions || 0;
 
-    // Compute coverage and next focus from current PRD draft
-    const coveragePre = parsePrdCoverage(session.prdDraft || '');
+    // Compute coverage and next focus from the ACCEPTED PRD on disk (not proposed draft)
+    let acceptedPrd = '';
+    try {
+      acceptedPrd = fs.readFileSync(path.join(__dirname, '..', session.prdPath), 'utf-8');
+    } catch {}
+    const coveragePre = parsePrdCoverage(acceptedPrd);
     let nextFocus = getNextFocus(coveragePre, session.cursor);
 
     // Intent routing
@@ -242,7 +246,12 @@ app.post('/api/llm', async (req, res) => {
       prompt: userInput,
       conversation: replyConversation,
       llm,
-      prdDraft: session.prdDraft || '',
+      // Anchor proposals to the accepted PRD on disk
+      prdDraft: acceptedPrd || '',
+      // Gate drafting on non-empty input; keep reply generation
+      shouldDraft: Boolean(userInput && userInput.trim()),
+      // Lower temperature for PRD drafting to reduce arbitrary domain jumps
+      temps: { reply: 0.6, draft: 0.2 },
       structure: {
         agenda,
         nextFocus,
@@ -255,22 +264,35 @@ app.post('/api/llm', async (req, res) => {
     console.log('scriptResult.prdDraft is', scriptResult.prdDraft ? 'truthy' : 'falsy', '| Value:', scriptResult.prdDraft);
     // Save LLM reply and PRD draft
     session.conversation.push({ role: 'assistant', content: scriptResult.reply });
-    // Always write the LLM's PRD draft (or session.prdDraft) to PRD_<sessionId>_temp.md for diffing
+    // Normalize helper to reduce spurious diffs
+    const normalizeMd = (s) => String(s || '')
+      .replace(/\r\n/g, '\n')            // normalize EOLs
+      .split('\n')
+      .map(l => l.replace(/\s+$/,''))     // trim trailing spaces
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')       // collapse multiple blank lines
+      .trim();
+
+    // Only write temp PRD if the proposed draft differs from the ACCEPTED PRD
     const tempPrdPath = path.join(__dirname, '..', 'Documents', `PRD_${sessionId}_temp.md`);
-    const prdDraftToWrite = typeof scriptResult.prdDraft === 'string' ? scriptResult.prdDraft : (session.prdDraft || '');
-    fs.writeFileSync(tempPrdPath, prdDraftToWrite, 'utf-8');
-    // Optionally update session.prdDraft in memory (but do NOT write to main PRD file here)
-    if (
-      typeof scriptResult.prdDraft === 'string' &&
-      scriptResult.prdDraft.trim() !== '' &&
-      scriptResult.prdDraft !== session.prdDraft
-    ) {
-      session.prdDraft = scriptResult.prdDraft;
+    // Only consider explicit proposed text from this turn
+    const proposed = typeof scriptResult.prdDraft === 'string' ? scriptResult.prdDraft : '';
+    const nProposed = normalizeMd(proposed);
+    const nAccepted = normalizeMd(acceptedPrd);
+    const hasPrdChanges = Boolean(nProposed && nProposed !== nAccepted);
+    if (hasPrdChanges) {
+      fs.writeFileSync(tempPrdPath, proposed, 'utf-8');
+    } else {
+      // If identical, remove any existing temp to clear pending state
+      try { if (fs.existsSync(tempPrdPath)) fs.unlinkSync(tempPrdPath); } catch {}
     }
-    // Update structure state after reply
-    const coveragePost = parsePrdCoverage(session.prdDraft || '');
+    // Do not update session.prdDraft automatically; only update on accept/merge
+    // Update structure state after reply — recompute from ACCEPTED PRD (unchanged until merge)
+    try { acceptedPrd = fs.readFileSync(path.join(__dirname, '..', session.prdPath), 'utf-8'); } catch {}
+    const coveragePost = parsePrdCoverage(acceptedPrd);
     const curFieldStatusPre = coveragePre[session.cursor.sectionIndex]?.fields?.[curNames.fieldName]?.status;
     const curFieldStatusPost = coveragePost[session.cursor.sectionIndex]?.fields?.[curNames.fieldName]?.status;
+    // Improvement should only reflect accepted PRD changes (i.e., after merges)
     const improved = (curFieldStatusPre !== 'covered') && (curFieldStatusPost === 'covered');
     if (userRequestedAdvance || improved) {
       session.cursor = advanceCursor(session.cursor, coveragePost);
@@ -289,7 +311,7 @@ app.post('/api/llm', async (req, res) => {
         console.warn('Failed to update conversation markdown for session', sessionId, e?.message || e);
       }
     }
-    return res.json({ reply: scriptResult.reply, prdDraft: scriptResult.prdDraft, session });
+    return res.json({ reply: scriptResult.reply, prdDraft: scriptResult.prdDraft, session, hasPrdChanges });
   } catch (error) {
     return res.status(500).json({ error: 'LLM script error', details: error });
   }
@@ -574,10 +596,22 @@ app.post('/api/prd/answer', async (req, res) => {
     session.conversation.push({ role: 'assistant', content: llmReply });
     updateSession(sessionId, session);
 
-    // Save proposed PRD draft to a temp file for user review
+    // Save proposed PRD draft to a temp file for user review (only if it differs from accepted PRD)
     if (newPrdDraft) {
       const tempPrdPath = path.join(__dirname, '..', 'Documents', `PRD_${sessionId}_temp.md`);
-      fs.writeFileSync(tempPrdPath, newPrdDraft);
+      const prdAbsPath = path.join(__dirname, '..', session.prdPath);
+      let accepted = '';
+      try { accepted = fs.readFileSync(prdAbsPath, 'utf-8'); } catch {}
+      const normalizeMd = (s) => String(s || '')
+        .replace(/\r\n/g, '\n')
+        .split('\n').map(l => l.replace(/\s+$/,'')).join('\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+      if (normalizeMd(newPrdDraft) && normalizeMd(newPrdDraft) !== normalizeMd(accepted)) {
+        fs.writeFileSync(tempPrdPath, newPrdDraft);
+      } else {
+        try { if (fs.existsSync(tempPrdPath)) fs.unlinkSync(tempPrdPath); } catch {}
+      }
     }
 
     // Update conversation markdown file as before

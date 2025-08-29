@@ -7,12 +7,12 @@ if not os.getenv("OPENAI_API_KEY"):
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-def get_llm_response_from_context(messages: list, model_name: str) -> str:
+def get_llm_response_from_context(messages: list, model_name: str, temperature: float = 0.7) -> str:
     try:
         response = client.chat.completions.create(
             model=model_name,
             messages=messages,
-            temperature=0.7
+            temperature=temperature
         )
         output = response.choices[0].message.content
     except Exception as e:
