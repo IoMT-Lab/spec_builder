@@ -1,99 +1,156 @@
-import React, { useEffect, useState } from 'react';
-import DiffViewer, { DiffMethod } from 'react-diff-viewer';
+import React, { useEffect, useMemo, useState } from 'react';
 import { diffLines } from 'diff';
 import './App.css';
 
-// Helper to split text into lines
+// Split text into lines (always produce an array)
 function splitLines(text) {
+  if (typeof text !== 'string') return [];
   return text.split(/\r?\n/);
 }
 
-// Helper to compute a unified diff (returns array of {type, oldLine, newLine, value})
+// Compute a unified, per-line diff with positional metadata
+// Returns [{ type: 'added'|'removed'|'unchanged', value, oldLine, newLine, oldPos, newPos }]
 function computeUnifiedDiff(oldLines, newLines) {
-  // Simple line-by-line diff (replace with a real diff algorithm for production)
-  const diff = diffLines(oldLines.join('\n'), newLines.join('\n'));
+  const parts = diffLines(oldLines.join('\n'), newLines.join('\n'));
   const result = [];
-  let oldLineNum = 0, newLineNum = 0;
-  diff.forEach(part => {
+  let oldPos = 0;
+  let newPos = 0;
+  parts.forEach(part => {
     const lines = part.value.split(/\r?\n/);
-    lines.forEach((line, idx) => {
-      if (idx === lines.length - 1 && line === '') return; // skip trailing empty
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (i === lines.length - 1 && line === '') continue; // skip trailing empty
       if (part.added) {
-        result.push({ type: 'added', oldLine: null, newLine: newLineNum + 1, value: line });
-        newLineNum++;
+        result.push({ type: 'added', value: line, oldLine: null, newLine: newPos + 1, oldPos, newPos });
+        newPos++;
       } else if (part.removed) {
-        result.push({ type: 'removed', oldLine: oldLineNum + 1, newLine: null, value: line });
-        oldLineNum++;
+        result.push({ type: 'removed', value: line, oldLine: oldPos + 1, newLine: null, oldPos, newPos });
+        oldPos++;
       } else {
-        result.push({ type: 'unchanged', oldLine: oldLineNum + 1, newLine: newLineNum + 1, value: line });
-        oldLineNum++;
-        newLineNum++;
+        result.push({ type: 'unchanged', value: line, oldLine: oldPos + 1, newLine: newPos + 1, oldPos, newPos });
+        oldPos++;
+        newPos++;
       }
-    });
+    }
   });
   return result;
 }
 
 const PrdDiffPanel = ({ sessionId, refreshKey, onSave }) => {
-  const [oldText, setOldText] = useState('');
-  const [newText, setNewText] = useState('');
+  // Left (working) and right (proposal) texts as arrays of lines
+  const [leftLines, setLeftLines] = useState([]);
+  const [rightLines, setRightLines] = useState([]);
   const [diff, setDiff] = useState([]);
-  const [mergedLines, setMergedLines] = useState([]); // user's accepted/rejected lines
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [history, setHistory] = useState([]); // stack of { left, right }
 
-  // Fetch diff on mount (session-specific)
+  // Load initial pair (main PRD vs temp draft)
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
+    setError(null);
     fetch(`/api/sessions/${sessionId}/prd/diff`)
       .then(r => {
-        console.log('DIFF FETCH RESPONSE:', r);
         if (!r.ok) throw new Error('Failed to load diff');
         return r.json();
       })
       .then(data => {
-        console.log('DIFF FETCH DATA:', data);
-        setOldText(data.oldText || '');
-        setNewText(data.newText || '');
-        const oldLines = splitLines(data.oldText || '');
-        const newLines = splitLines(data.newText || '');
-        const unified = computeUnifiedDiff(oldLines, newLines);
-        setDiff(unified);
-        // Default: accept all new lines, reject removed lines
-        setMergedLines(unified.map(d => d.type === 'removed' ? null : d.value));
+        if (cancelled) return;
+        const left = splitLines(data.oldText || '');
+        const right = splitLines(data.newText || '');
+        setLeftLines(left);
+        setRightLines(right);
+        setHistory([]);
         setLoading(false);
       })
       .catch(e => {
+        if (cancelled) return;
         console.error('DIFF FETCH ERROR:', e);
-        setOldText('');
-        setNewText('');
+        setLeftLines([]);
+        setRightLines([]);
         setDiff([]);
-        setMergedLines([]);
+        setHistory([]);
         setError('No PRD changes to review yet.');
         setLoading(false);
       });
+    return () => { cancelled = true; };
   }, [sessionId, refreshKey]);
 
-  // Accept a line (use new value)
-  const handleAccept = idx => {
-    setMergedLines(ml => ml.map((line, i) => i === idx ? diff[idx].value : line));
+  // Recompute diff whenever left/right change
+  useEffect(() => {
+    setDiff(computeUnifiedDiff(leftLines, rightLines));
+  }, [leftLines, rightLines]);
+
+  const canUndo = history.length > 0;
+  const hasChanges = useMemo(() => diff.some(d => d.type !== 'unchanged'), [diff]);
+
+  // Helpers to push snapshot and restore
+  const pushSnapshot = () => {
+    setHistory(h => [...h, { left: leftLines.slice(), right: rightLines.slice() }]);
   };
-  // Reject a line (use old value for removed, or remove added)
-  const handleReject = idx => {
-    if (diff[idx].type === 'added') {
-      setMergedLines(ml => ml.map((line, i) => i === idx ? null : line));
-    } else if (diff[idx].type === 'removed') {
-      setMergedLines(ml => ml.map((line, i) => i === idx ? diff[idx].value : line));
-    } else {
-      // unchanged: do nothing
+
+  const handleUndo = () => {
+    setHistory(h => {
+      if (h.length === 0) return h;
+      const next = h.slice(0, -1);
+      const last = h[h.length - 1];
+      setLeftLines(last.left.slice());
+      setRightLines(last.right.slice());
+      return next;
+    });
+  };
+
+  // Apply actions to shrink the diff and re-diff
+  const handleAccept = (idx) => {
+    const d = diff[idx];
+    if (!d || d.type === 'unchanged') return;
+    pushSnapshot();
+    if (d.type === 'added') {
+      // Bring the proposed line into the working doc (insert into left at oldPos)
+      setLeftLines(prev => {
+        const next = prev.slice();
+        const pos = Math.max(0, Math.min(d.oldPos, next.length));
+        next.splice(pos, 0, d.value);
+        return next;
+      });
+    } else if (d.type === 'removed') {
+      // Accept the removal: delete from left at oldPos
+      setLeftLines(prev => {
+        const next = prev.slice();
+        if (d.oldPos >= 0 && d.oldPos < next.length) next.splice(d.oldPos, 1);
+        return next;
+      });
     }
   };
 
-  // Finalize/save merged PRD (session-specific)
+  const handleReject = (idx) => {
+    const d = diff[idx];
+    if (!d || d.type === 'unchanged') return;
+    pushSnapshot();
+    if (d.type === 'added') {
+      // Reject the addition: remove from right at newPos
+      setRightLines(prev => {
+        const next = prev.slice();
+        if (d.newPos >= 0 && d.newPos < next.length) next.splice(d.newPos, 1);
+        return next;
+      });
+    } else if (d.type === 'removed') {
+      // Reject the removal: reinsert into right at newPos
+      setRightLines(prev => {
+        const next = prev.slice();
+        const pos = Math.max(0, Math.min(d.newPos, next.length));
+        next.splice(pos, 0, d.value);
+        return next;
+      });
+    }
+  };
+
+  // Save the merged working document (left)
   const handleSave = () => {
     setSaving(true);
-    const mergedText = mergedLines.filter(l => l !== null).join('\n');
+    const mergedText = leftLines.join('\n');
     fetch(`/api/sessions/${sessionId}/prd/merge`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -102,43 +159,40 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave }) => {
       .then(r => r.json())
       .then(data => {
         setSaving(false);
-        if (data.ok && onSave) onSave();
+        if (data.ok) {
+          setHistory([]);
+          if (onSave) onSave();
+        }
       })
       .catch(e => { setError('Failed to save'); setSaving(false); });
   };
 
   if (loading) return <div>Loading PRD diff...</div>;
   if (error) return <div style={{ color: 'red' }}>{error}</div>;
+  if (!hasChanges) return null; // Hide panel when there are no differences
 
-  // Render unified diff with accept/reject controls
   return (
     <div className="prd-diff-panel">
       <h2>Review PRD Changes (Unified Diff)</h2>
       <div className="diff-unified-view">
         <pre style={{ background: '#f7f7f7', padding: 12, borderRadius: 6 }}>
           {diff.map((d, idx) => {
-            let bg = d.type === 'added' ? '#e6ffed' : d.type === 'removed' ? '#ffeef0' : 'transparent';
-            let textColor = d.type === 'added' ? '#22863a' : d.type === 'removed' ? '#b31d28' : '#24292e';
-            let lineNum = d.type === 'added' ? '+' + d.newLine : d.type === 'removed' ? '-' + d.oldLine : ' ' + d.oldLine;
+            const bg = d.type === 'added' ? '#e6ffed' : d.type === 'removed' ? '#ffeef0' : 'transparent';
+            const textColor = d.type === 'added' ? '#22863a' : d.type === 'removed' ? '#b31d28' : '#24292e';
+            const lineNum = d.type === 'added' ? '+' + d.newLine : d.type === 'removed' ? '-' + d.oldLine : ' ' + d.oldLine;
             return (
               <div key={idx} style={{ display: 'flex', alignItems: 'center', background: bg }}>
                 <span style={{ width: 40, color: '#888', userSelect: 'none' }}>{lineNum}</span>
-                {mergedLines[idx] !== null ? (
-                  <span style={{ color: textColor, whiteSpace: 'pre-wrap', flex: 1 }}>{mergedLines[idx]}</span>
-                ) : (
-                  <span style={{ color: '#bbb', fontStyle: 'italic', flex: 1 }}>[removed]</span>
-                )}
+                <span style={{ color: textColor, whiteSpace: 'pre-wrap', flex: 1 }}>{d.value}</span>
                 {d.type !== 'unchanged' && (
                   <span style={{ marginLeft: 8 }}>
                     <button
                       style={{ marginRight: 4, background: '#e6ffed', border: '1px solid #22863a', color: '#22863a', borderRadius: 3, cursor: 'pointer' }}
                       onClick={() => handleAccept(idx)}
-                      disabled={mergedLines[idx] === d.value}
                     >Accept</button>
                     <button
                       style={{ background: '#ffeef0', border: '1px solid #b31d28', color: '#b31d28', borderRadius: 3, cursor: 'pointer' }}
                       onClick={() => handleReject(idx)}
-                      disabled={mergedLines[idx] !== d.value && mergedLines[idx] === null}
                     >Reject</button>
                   </span>
                 )}
@@ -147,9 +201,12 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave }) => {
           })}
         </pre>
       </div>
-      <button onClick={handleSave} disabled={saving} style={{ marginTop: 16, padding: '8px 20px', fontWeight: 'bold', background: '#0366d6', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
-        {saving ? 'Saving...' : 'Finalize & Save PRD'}
-      </button>
+      <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+        <button onClick={handleUndo} disabled={!canUndo} style={{ padding: '8px 16px' }}>Undo</button>
+        <button onClick={handleSave} disabled={saving} style={{ padding: '8px 20px', fontWeight: 'bold', background: '#0366d6', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+          {saving ? 'Saving...' : 'Finalize & Save PRD'}
+        </button>
+      </div>
     </div>
   );
 };

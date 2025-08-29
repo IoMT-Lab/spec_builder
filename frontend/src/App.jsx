@@ -23,14 +23,28 @@ function App() {
   const [menuBarRect, setMenuBarRect] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  const ORDER_KEY = 'session_order_v1';
+  const loadOrder = () => {
+    try { return JSON.parse(localStorage.getItem(ORDER_KEY)) || []; } catch { return []; }
+  };
+  const saveOrder = (ids) => {
+    try { localStorage.setItem(ORDER_KEY, JSON.stringify(ids)); } catch {}
+  };
+  const applyOrder = (arr) => {
+    const order = loadOrder();
+    const idx = new Map(order.map((id, i) => [id, i]));
+    return [...arr].sort((a, b) => (idx.has(a.id) ? idx.get(a.id) : 1e9) - (idx.has(b.id) ? idx.get(b.id) : 1e9));
+  };
+
   // PRD session state
   const [prdSessionId, setPrdSessionId] = useState(null);
   const [prdStep, setPrdStep] = useState(null); // { section, field, prompt, example }
   const [prdAnswers, setPrdAnswers] = useState({});
   const [prdMode, setPrdMode] = useState(false); // true = PRD flow, false = normal LLM
 
-  // Add a refreshKey state to trigger PRD diff panel refresh
+  // Add refresh keys to trigger PRD diff and markdown refresh
   const [prdDiffRefreshKey, setPrdDiffRefreshKey] = useState(0);
+  const [markdownRefreshKey, setMarkdownRefreshKey] = useState(0);
 
   useEffect(() => {
     if (menuBarRef.current) {
@@ -44,7 +58,7 @@ function App() {
     try {
       const res = await fetch('/api/sessions');
       const data = await res.json();
-      setSessions(data);
+      setSessions(applyOrder(data));
       // If currentSession is missing or deleted, select the first available
       if (!data.find(s => currentSession && s.id === currentSession.id)) {
         setCurrentSession(data[0] || null);
@@ -106,12 +120,6 @@ function App() {
   const handleSend = async () => {
     if (!userInput.trim() || !currentSession) return;
     setLoading(true);
-    // Add user message to backend
-    await fetch(`/api/sessions/${currentSession.id}/message`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role: 'user', content: userInput })
-    });
     // Call LLM endpoint
     const res = await fetch('/api/llm', {
       method: 'POST',
@@ -123,14 +131,6 @@ function App() {
       })
     });
     const data = await res.json();
-    // Add assistant message to backend
-    if (data.reply) {
-      await fetch(`/api/sessions/${currentSession.id}/message`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role: 'assistant', content: data.reply })
-      });
-    }
     // Always trigger PRD diff refresh after every LLM response
     setPrdDiffRefreshKey(k => k + 1);
     // Re-fetch session to update conversation
@@ -168,65 +168,82 @@ function App() {
     setApiCheckLoading(false);
   };
 
+  // Delete session (optimistic)
+  const handleDeleteSession = async (id) => {
+    try {
+      setSessions(prev => {
+        const next = prev.filter(s => s.id !== id);
+        saveOrder(next.map(s => s.id));
+        if (currentSession && currentSession.id === id) {
+          setCurrentSession(next[0] || null);
+        }
+        return next;
+      });
+      await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
+    } catch (err) {
+      console.warn('Delete session failed:', err);
+      // Non-fatal: UI already updated; if needed, user can refresh sessions list
+    }
+  };
+
   // Create new session
   const handleNewSession = async () => {
-    const title = prompt('Enter a title for the new session:');
-    if (!title) return;
-    const res = await fetch('/api/sessions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title }),
-    });
-    const newSession = await res.json();
-    setCurrentSession(newSession); // Use the returned session directly
-    setSessions(prev => {
-      // Add the new session to the list if not already present
-      if (!prev.find(s => s.id === newSession.id)) {
-        return [newSession, ...prev];
+    try {
+      // Prompt for title (fallback to default if blocked/cancelled)
+      let title = undefined;
+      try { title = prompt('Enter a title for the new session:'); } catch {}
+      if (!title || !String(title).trim()) {
+        const ts = new Date();
+        title = `Session ${ts.getFullYear()}-${String(ts.getMonth()+1).padStart(2,'0')}-${String(ts.getDate()).padStart(2,'0')} ${String(ts.getHours()).padStart(2,'0')}:${String(ts.getMinutes()).padStart(2,'0')}`;
       }
-      return prev;
-    });
-    await fetchSessions(); // Optionally refresh the list, but don't use it to set currentSession
-    setSidebarOpen(true); // Open sidebar after creating session
-    setErrorMsg(''); // Clear error on new session
 
-    // Ensure session is available before proceeding (with retry logic)
-    let sessionAvailable = false;
-    for (let i = 0; i < 5; i++) {
+      // Optimistic local add so the UI responds instantly
+      const tempId = 'tmp-' + Date.now();
+      const tempSession = { id: tempId, title, conversation: [], prdDraft: '', prdPath: '', conversationPath: '' };
+      setSessions(prev => {
+        const next = [tempSession, ...prev];
+        saveOrder(next.map(s => s.id));
+        return next;
+      });
+      setCurrentSession(tempSession);
+      setSidebarOpen(true);
+      setErrorMsg('');
+
+      // Create on server
+      const res = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      });
+      if (!res.ok) throw new Error(`Create failed (${res.status})`);
+      const serverSession = await res.json();
+
+      // Replace temp with server session
+      setSessions(prev => prev.map(s => s.id === tempId ? serverSession : s));
+      setCurrentSession(serverSession);
+
+      // Kick off initial assistant message (non-blocking)
       try {
-        const checkRes = await fetch(`/api/sessions/${newSession.id}`);
-        if (checkRes.ok) {
-          sessionAvailable = true;
-          break;
-        }
-      } catch (err) {}
-      // Wait 200ms before retrying
-      await new Promise(res => setTimeout(res, 200));
+        const llmRes = await fetch('/api/llm', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ input: '', llm: llmProvider, sessionId: serverSession.id })
+        });
+        const llmData = await llmRes.json();
+        // Refresh conversation from server (LLM endpoint already persists it)
+        try {
+          const sessionRes = await fetch(`/api/sessions/${serverSession.id}`);
+          const sessionData = await sessionRes.json();
+          setConversation(sessionData.conversation || []);
+        } catch {}
+        if (llmData.error) setErrorMsg(llmData.error + (llmData.details ? `\n${llmData.details.stderr || llmData.details}` : ''));
+      } catch (e) {
+        // Non-fatal; surface minimal info
+        console.warn('Initial LLM message failed:', e);
+      }
+    } catch (err) {
+      console.error('New session failed:', err);
+      setErrorMsg('Failed to create session. Is the backend running?');
     }
-    if (!sessionAvailable) {
-      setErrorMsg('Session not found after creation. Please try again.');
-      return;
-    }
-
-    // Trigger initial assistant message for new session
-    const llmRes = await fetch('/api/llm', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        input: '',
-        llm: llmProvider,
-        sessionId: newSession.id,
-      }),
-    });
-    const llmData = await llmRes.json();
-    const initialReply = llmData.reply || (llmData.error ? `Error: ${llmData.error}` : 'No reply');
-    if (llmData.error) setErrorMsg(llmData.error + (llmData.details ? `\n${llmData.details.stderr || llmData.details}` : ''));
-    await fetch(`/api/sessions/${newSession.id}/message`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role: 'assistant', content: initialReply }),
-    });
-    setConversation([{ role: 'assistant', content: initialReply }]);
   };
 
   // Start PRD flow
@@ -287,8 +304,11 @@ function App() {
     setLoading(false);
   };
 
-  // Handler to increment refreshKey (pass to MarkdownPanel)
-  const handlePrdSave = () => setPrdDiffRefreshKey(k => k + 1);
+  // Handler to increment refresh keys (used by diff merge and manual save)
+  const handlePrdSave = () => {
+    setPrdDiffRefreshKey(k => k + 1);
+    setMarkdownRefreshKey(k => k + 1);
+  };
 
   // Sidebar UI
   const sidebar = (
@@ -296,62 +316,65 @@ function App() {
       <aside className="sidebar">
         <div className="sidebar-header">
           <span>Sessions</span>
-          <button className="new-session-btn" onClick={handleNewSession}>+</button>
+          <button
+            type="button"
+            className="new-session-btn"
+            onMouseDown={(e)=>{ e.preventDefault(); e.stopPropagation(); handleNewSession(); }}
+            onClick={handleNewSession}
+          >+
+          </button>
           <button className="close-sidebar-btn" onClick={() => setSidebarOpen(false)} style={{marginLeft: 8}}>&times;</button>
         </div>
         <ul className="session-list">
-          {sessions.map(s => (
+          {sessions.map((s) => (
             <li
               key={s.id}
-              className={currentSession && s.id === currentSession.id ? 'active' : ''}
-              onClick={() => setCurrentSession(s)}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+              className={(currentSession && s.id === currentSession.id ? 'active ' : '')}
             >
-              <span style={{ flex: 1, cursor: 'pointer' }}>{s.title}</span>
-              <button
-                className="rename-session-btn"
-                title="Rename session"
-                onClick={e => {
-                  e.stopPropagation();
-                  const newTitle = prompt('Rename session:', s.title);
-                  if (newTitle && newTitle !== s.title) {
-                    fetch(`/api/sessions/${s.id}`, {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ title: newTitle }),
-                    })
-                      .then(res => res.json())
-                      .then(updated => {
-                        setSessions(sessions => sessions.map(sess => sess.id === s.id ? { ...sess, title: updated.title } : sess));
-                        // Re-fetch sessions to ensure up-to-date list/order
-                        fetchSessions();
-                      });
-                  }
-                }}
-                style={{ marginLeft: 4, fontSize: '1rem', background: 'none', border: 'none', cursor: 'pointer', color: '#6366f1' }}
-              >✏️</button>
-              <button
-                className="delete-session-btn"
-                title="Delete session"
-                onClick={e => {
-                  e.stopPropagation();
-                  if (window.confirm('Delete this session and its PRD?')) {
-                    fetch(`/api/sessions/${s.id}`, { method: 'DELETE' })
-                      .then(res => res.json())
-                      .then(() => {
-                        setSessions(sessions => sessions.filter(sess => sess.id !== s.id));
-                        if (currentSession && currentSession.id === s.id) {
-                          setCurrentSession(sessions.find(sess => sess.id !== s.id) || null);
-                        }
-                        // Re-fetch sessions to ensure up-to-date list/order
-                        fetchSessions();
-                      });
-                  }
-                }}
-                style={{ marginLeft: 4, fontSize: '1rem', background: 'none', border: 'none', cursor: 'pointer', color: '#e11d48' }}
-              >🗑️</button>
-            </li>
+              <span
+                className="session-title"
+                onMouseDown={(e)=>{ e.preventDefault(); e.stopPropagation(); setCurrentSession(s); }}
+                onClick={() => setCurrentSession(s)}
+              >{s.title}</span>
+              <span className="session-actions">
+                <button
+                  type="button"
+                  className="icon-btn"
+                  aria-label="Rename session"
+                  title="Rename session"
+                  onMouseDown={(e)=>{ e.stopPropagation(); }}
+                  onClick={(e) => { e.stopPropagation();
+                    const newTitle = prompt('Rename session:', s.title);
+                    if (newTitle && newTitle !== s.title) {
+                      fetch(`/api/sessions/${s.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: newTitle }) })
+                        .then(res => res.json())
+                        .then(updated => setSessions(list => list.map(sess => sess.id === s.id ? { ...sess, title: updated.title } : sess)));
+                    }
+                  }}
+                >
+                  <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 20h4l10-10-4-4L4 16v4Z"/>
+                    <path d="M14 6l4 4"/>
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  aria-label="Delete session"
+                  title="Delete session"
+                  onPointerDown={(e)=>{ e.stopPropagation(); }}
+                  onClick={(e)=>{ e.stopPropagation(); if (window.confirm('Delete this session and its PRD?')) handleDeleteSession(s.id); }}
+                >
+                  <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M5 7h14"/>
+                    <path d="M7 7l1 12h8l1-12"/>
+                    <path d="M9 7V5h6v2"/>
+                  </svg>
+                </button>
+              </span>
+              </li>
           ))}
+          {/* no drag indicators */}
         </ul>
         <div className="sidebar-section">
           <label htmlFor="llm-select" className="llm-select-label">LLM:</label>
@@ -403,10 +426,16 @@ function App() {
   }, []);
 
   return (
-    <div className="app-container" style={{ position: 'relative', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div className={`app-container`} style={{ position: 'relative', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <DraftsmanBackground />
       {topMenu}
-      <div className="app-main">
+      {sidebarOpen && (
+        <div
+          className="sidebar-backdrop"
+          onMouseDown={() => setSidebarOpen(false)}
+        />
+      )}
+      <div className={`app-main`}>
         {sidebar}
         <div className="main-content">
           {/* Top Panels Row */}
@@ -470,9 +499,9 @@ function App() {
                 <div className="markdown-panel-content">
                   {/* Show PRD diff panel if a temp draft exists */}
                   {currentSession && (
-                    <PrdDiffPanel sessionId={currentSession.id} refreshKey={prdDiffRefreshKey} />
+                    <PrdDiffPanel sessionId={currentSession.id} refreshKey={prdDiffRefreshKey} onSave={handlePrdSave} />
                   )}
-                  <MarkdownPanel sessionId={currentSession ? currentSession.id : null} onSave={handlePrdSave} />
+                  <MarkdownPanel sessionId={currentSession ? currentSession.id : null} onSave={handlePrdSave} refreshKey={markdownRefreshKey} />
                 </div>
               </div>
             </div>

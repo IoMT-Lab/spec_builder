@@ -12,8 +12,7 @@ export default function DraftsmanBackground() {
         pointerEvents: 'none',
         opacity: 0.7,
       }}
-      width="100vw"
-      height="100vh"
+      /* width/height attributes removed to satisfy React/SVG expectations */
       viewBox="0 0 1920 1080"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"

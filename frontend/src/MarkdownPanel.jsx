@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 
-export default function MarkdownPanel({ sessionId, onSave }) {
+export default function MarkdownPanel({ sessionId, onSave, refreshKey }) {
   const [markdown, setMarkdown] = useState('');
   const [editMode, setEditMode] = useState(false);
   const [editValue, setEditValue] = useState('');
@@ -32,7 +32,7 @@ export default function MarkdownPanel({ sessionId, onSave }) {
         setEditValue('');
         setLoading(false);
       });
-  }, [sessionId]);
+  }, [sessionId, refreshKey]);
 
   // Save PRD
   const handleSave = async () => {

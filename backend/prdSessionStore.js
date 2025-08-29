@@ -1,5 +1,5 @@
 // PRD session state management for each user/session
-// This is a simple in-memory store. For production, use a database or persistent storage.
+// Simple in-memory cache with JSON persistence to sessions/ directory.
 
 const sessions = {};
 
@@ -10,8 +10,10 @@ function createSession({ projectDescription, industryDomain = '', projectType = 
   // Create the markdown file for the PRD
   const fs = require('fs');
   const path = require('path');
+  const sessionsDir = path.join(__dirname, '..', 'sessions');
   const absPrdPath = path.join(__dirname, '..', prdPath);
   const absConvoPath = path.join(__dirname, '..', conversationPath);
+  if (!fs.existsSync(sessionsDir)) fs.mkdirSync(sessionsDir, { recursive: true });
   if (!fs.existsSync(path.dirname(absPrdPath))) fs.mkdirSync(path.dirname(absPrdPath), { recursive: true });
   fs.writeFileSync(absPrdPath, `# PRD for session ${sessionId}\n`);
   fs.writeFileSync(absConvoPath, `# Conversation History for session ${sessionId}\n`);
@@ -26,7 +28,15 @@ function createSession({ projectDescription, industryDomain = '', projectType = 
     conversation: [], // LLM conversation history
     prdPath,
     conversationPath,
+    id: sessionId,
   };
+  // Persist initial session JSON
+  try {
+    const sessionFile = path.join(sessionsDir, `${sessionId}.json`);
+    fs.writeFileSync(sessionFile, JSON.stringify(sessions[sessionId], null, 2));
+  } catch (e) {
+    console.warn('Failed to persist new session JSON:', e?.message || e);
+  }
   return sessionId;
 }
 
@@ -51,8 +61,23 @@ function getSession(sessionId) {
 }
 
 function updateSession(sessionId, updates) {
-  if (sessions[sessionId]) {
-    Object.assign(sessions[sessionId], updates);
+  const fs = require('fs');
+  const path = require('path');
+  const sessionsDir = path.join(__dirname, '..', 'sessions');
+  if (!sessions[sessionId]) {
+    // Try to hydrate from disk if missing in memory
+    const hydrated = getSession(sessionId) || {};
+    sessions[sessionId] = hydrated;
+  }
+  // Merge into memory
+  Object.assign(sessions[sessionId], updates);
+  // Persist to disk
+  try {
+    if (!fs.existsSync(sessionsDir)) fs.mkdirSync(sessionsDir, { recursive: true });
+    const sessionFile = path.join(sessionsDir, `${sessionId}.json`);
+    fs.writeFileSync(sessionFile, JSON.stringify(sessions[sessionId], null, 2));
+  } catch (e) {
+    console.warn('Failed to persist session JSON:', sessionId, e?.message || e);
   }
 }
 

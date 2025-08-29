@@ -5,6 +5,10 @@
   --black: #181818;
   --yellow: #ffe600;
   --font-micro: 'Fira Mono', 'IBM Plex Mono', 'Menlo', monospace;
+  /* Global layout gutter for left/right spacing */
+  --gutter: 24px;
+  /* Sidebar overlay width */
+  --sidebarW: 240px;
 }
 
 body {
@@ -140,7 +144,7 @@ input, textarea {
   display: flex;
   flex-direction: row;
   width: 100%;
-  max-width: 1200px;
+  max-width: 1200px; /* center the app body when menu closed */
   margin: 0 auto;
   min-height: 700px;
   background: var(--neon-green);
@@ -151,27 +155,44 @@ input, textarea {
 }
 
 .sidebar {
-  width: 220px;
-  min-width: 180px;
-  max-width: 260px;
+  position: fixed; /* overlay sidebar that doesn't push content */
+  top: 48px; /* align under the menu bar */
+  left: 0;
+  height: calc(100vh - 48px);
+  width: var(--sidebarW);
   background: var(--neon-green);
   border-right: 1.5px solid var(--black);
   box-sizing: border-box;
-  padding: 18px 12px 12px 18px;
+  padding: 18px var(--gutter) 12px var(--gutter);
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  z-index: 3;
+  z-index: 1010; /* above content */
+  overflow-y: auto; /* scroll long lists */
 }
+
+/* optional dim background when sidebar is open */
+.sidebar-backdrop {
+  position: fixed;
+  top: 48px;
+  /* Backdrop begins exactly at the sidebar's right edge */
+  left: var(--sidebarW);
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.06);
+  z-index: 1000;
+}
+
+/* no drag state needed; backdrop always clickable outside sidebar */
 
 .main-content {
   flex: 1;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: center; /* restore centered content */
   width: 100%;
   box-sizing: border-box;
-  padding: 0 0 0 0;
+  padding: 0; /* no horizontal padding so rows center cleanly */
   min-height: 700px;
 }
 
@@ -200,7 +221,7 @@ input, textarea {
   gap: 0;
   width: 900px;
   max-width: 100%;
-  margin: 32px auto 0 auto;
+  margin: 32px auto 0 auto; /* centered row */
   background: none;
 }
 .panel {
@@ -217,9 +238,92 @@ input, textarea {
   gap: 18px;
   width: 95%;
   max-width: 900px;
-  margin: 36px auto 0 auto;
+  margin: 36px auto 0 auto; /* centered row */
   align-items: stretch;
   min-height: 220px;
+}
+
+/* ---- Sidebar session list (neon schematic) ---- */
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.session-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 16px 0;
+  display: grid;
+  row-gap: 6px;
+  width: 100%;
+}
+
+.session-list li {
+  display: grid;
+  grid-template-columns: 1fr auto; /* title | actions */
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1.5px solid var(--black);
+  background: rgba(182,255,0,0.08);
+}
+
+/* no drag/drop indicators in simplified menu */
+.session-list .drop-indicator { display: none; }
+
+/* during reordering, avoid text selection and keep interactions crisp */
+/* remove drag-only cursor/selection rules */
+body.is-dragging, body.is-dragging * { }
+
+.session-list li.active {
+  background: rgba(182,255,0,0.16);
+}
+
+/* hide old drag handle */
+.drag-handle { display: none; }
+
+.session-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.session-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0.6;
+  transition: opacity .15s ease;
+}
+.session-list li:hover .session-actions,
+.session-list li:focus-within .session-actions { opacity: 1; }
+
+.icon-btn {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border: 2px solid var(--black);
+  background: transparent;
+  cursor: pointer;
+}
+.icon-btn:hover { background: var(--neon-green); }
+.icon {
+  width: 16px;
+  height: 16px;
+  stroke: var(--black);
+  stroke-width: 1.8;
+  fill: none;
+}
+
+/* drag visual */
+.session-list li.dragging {
+  outline: 2px dashed var(--black);
+  background: rgba(182,255,0,0.22);
 }
 .llm-replies, .markdown-panel {
   background: transparent;
@@ -349,4 +453,37 @@ input, textarea {
 .panel-expand:hover {
   color: var(--neon-green);
   transform: scale(1.15);
+}
+
+/* --- Scroll caps for Replies and PRD document (Option A) --- */
+:root {
+  /* Tweak these to adjust how much of the viewport each panel can occupy */
+  --repliesMaxVh: 40vh; /* LLM Replies content max height */
+  --docMaxVh: 52vh;     /* PRD Document content max height */
+}
+
+/* Allow inner content to scroll inside flex containers */
+.llm-replies,
+.markdown-panel {
+  min-height: 0;
+}
+
+/* Cap the LLM replies content and enable vertical scrolling */
+.llm-replies .llm-replies-content {
+  max-height: var(--repliesMaxVh);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 8px; /* avoid text under scrollbar */
+}
+
+/* Cap the PRD document area and enable vertical scrolling */
+.markdown-panel .markdown-panel-content {
+  max-height: var(--docMaxVh);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 8px;
 }

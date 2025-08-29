@@ -92,6 +92,16 @@ app.post('/api/llm', async (req, res) => {
       session.prdDraft = scriptResult.prdDraft;
     }
     updateSession(sessionId, session);
+    // Update conversation markdown file as well for transparency/export
+    if (session.conversationPath) {
+      try {
+        const conversationAbsPath = path.join(__dirname, '..', session.conversationPath);
+        const conversationMarkdown = generateConversationMarkdown(session);
+        fs.writeFileSync(conversationAbsPath, conversationMarkdown);
+      } catch (e) {
+        console.warn('Failed to update conversation markdown for session', sessionId, e?.message || e);
+      }
+    }
     return res.json({ reply: scriptResult.reply, prdDraft: scriptResult.prdDraft, session });
   } catch (error) {
     return res.status(500).json({ error: 'LLM script error', details: error });
@@ -197,15 +207,9 @@ app.post('/api/sessions', (req, res) => {
 // Get a session by ID
 app.get('/api/sessions/:id', (req, res) => {
   console.log('GET /api/sessions/' + req.params.id + ' called');
-  const sessionFile = path.join(sessionsDir, `${req.params.id}.json`);
-  if (!fs.existsSync(sessionFile)) return res.status(404).json({ error: 'Session not found' });
-  const session = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
-  // After fetching session:
-  if (session) {
-    console.log('Session found:', req.params.id);
-  } else {
-    console.error('Session NOT found:', req.params.id);
-  }
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  console.log('Session found:', req.params.id);
   res.json(session);
 });
 
@@ -213,14 +217,13 @@ app.get('/api/sessions/:id', (req, res) => {
 // Add logging to /api/sessions/:id/message endpoint
 app.post('/api/sessions/:id/message', async (req, res) => {
   console.log('POST /api/sessions/' + req.params.id + '/message called with body:', req.body);
-  const sessionFile = path.join(sessionsDir, `${req.params.id}.json`);
-  if (!fs.existsSync(sessionFile)) return res.status(404).json({ error: 'Session not found' });
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
   const { role, content } = req.body;
   if (!role || !content) return res.status(400).json({ error: 'Missing role or content' });
-  const session = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
   session.conversation = session.conversation || [];
   session.conversation.push({ role, content });
-  fs.writeFileSync(sessionFile, JSON.stringify(session, null, 2));
+  updateSession(req.params.id, session);
   // --- Update conversation markdown file ---
   if (session.conversationPath) {
     const conversationAbsPath = path.join(__dirname, '..', session.conversationPath);
@@ -247,23 +250,21 @@ app.post('/api/sessions/:id/message', async (req, res) => {
 
 // Update PRD for a session
 app.put('/api/sessions/:id/prd', (req, res) => {
-  const sessionFile = path.join(sessionsDir, `${req.params.id}.json`);
-  if (!fs.existsSync(sessionFile)) return res.status(404).json({ error: 'Session not found' });
   const { prdContent } = req.body;
   if (typeof prdContent !== 'string') return res.status(400).json({ error: 'Missing prdContent' });
-  const session = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
   const prdAbsPath = path.join(__dirname, '..', session.prdPath);
   fs.writeFileSync(prdAbsPath, prdContent);
   session.prdDraft = prdContent;
-  fs.writeFileSync(sessionFile, JSON.stringify(session, null, 2));
+  updateSession(req.params.id, session);
   res.json({ ok: true });
 });
 
 // Get PRD for a session (returns markdown)
 app.get('/api/sessions/:id/prd', (req, res) => {
-  const sessionFile = path.join(sessionsDir, `${req.params.id}.json`);
-  if (!fs.existsSync(sessionFile)) return res.status(404).send('Session not found');
-  const session = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).send('Session not found');
   const prdAbsPath = path.join(__dirname, '..', session.prdPath);
   if (!fs.existsSync(prdAbsPath)) return res.status(404).send('PRD not found');
   res.type('text/markdown');
@@ -276,26 +277,27 @@ app.get('/api/sessions/:id/prd', (req, res) => {
 
 // Rename a session (update title)
 app.put('/api/sessions/:id', (req, res) => {
-  const sessionFile = path.join(sessionsDir, `${req.params.id}.json`);
-  if (!fs.existsSync(sessionFile)) return res.status(404).json({ error: 'Session not found' });
   const { title } = req.body;
   if (!title) return res.status(400).json({ error: 'Missing title' });
-  const session = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
   session.title = title;
-  fs.writeFileSync(sessionFile, JSON.stringify(session, null, 2));
+  updateSession(req.params.id, session);
   res.json(session);
 });
 
 // Delete a session (and its PRD file)
 app.delete('/api/sessions/:id', (req, res) => {
-  const sessionFile = path.join(sessionsDir, `${req.params.id}.json`);
-  if (!fs.existsSync(sessionFile)) return res.status(404).json({ error: 'Session not found' });
-  const session = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
   // Delete PRD file if it exists
   const prdAbsPath = path.join(__dirname, '..', session.prdPath);
   if (fs.existsSync(prdAbsPath)) fs.unlinkSync(prdAbsPath);
   // Delete session file
-  fs.unlinkSync(sessionFile);
+  try {
+    const sessionFile = path.join(sessionsDir, `${req.params.id}.json`);
+    if (fs.existsSync(sessionFile)) fs.unlinkSync(sessionFile);
+  } catch {}
   res.json({ ok: true });
 });
 
@@ -429,9 +431,8 @@ app.get('/api/prd/draft', (req, res) => {
 
 // Get both main and temp PRD drafts for diff view
 app.get('/api/sessions/:id/prd/compare', (req, res) => {
-  const sessionFile = path.join(sessionsDir, `${req.params.id}.json`);
-  if (!fs.existsSync(sessionFile)) return res.status(404).json({ error: 'Session not found' });
-  const session = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
   const prdAbsPath = path.join(__dirname, '..', session.prdPath);
   let main = '';
   let temp = '';
@@ -449,16 +450,15 @@ app.get('/api/sessions/:id/prd/compare', (req, res) => {
 
 // Accept the temp PRD draft: overwrite main PRD and delete temp
 app.post('/api/sessions/:id/prd/accept', (req, res) => {
-  const sessionFile = path.join(sessionsDir, `${req.params.id}.json`);
-  if (!fs.existsSync(sessionFile)) return res.status(404).json({ error: 'Session not found' });
-  const session = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
   const prdAbsPath = path.join(__dirname, '..', session.prdPath);
   const tempPath = path.join(__dirname, '..', 'Documents', `PRD_${req.params.id}_temp.md`);
   if (!fs.existsSync(tempPath)) return res.status(400).json({ error: 'No temp PRD draft to accept' });
   const tempContent = fs.readFileSync(tempPath, 'utf-8');
   fs.writeFileSync(prdAbsPath, tempContent); // Overwrite main PRD
   session.prdDraft = tempContent;
-  fs.writeFileSync(sessionFile, JSON.stringify(session, null, 2));
+  updateSession(req.params.id, session);
   fs.unlinkSync(tempPath); // Delete temp file
   res.json({ ok: true });
 });
