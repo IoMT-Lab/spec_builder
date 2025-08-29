@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { diffLines } from 'diff';
+import { diffLines, structuredPatch } from 'diff';
 import './App.css';
 
 // Split text into lines (always produce an array)
@@ -45,6 +45,7 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave }) => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [history, setHistory] = useState([]); // stack of { left, right }
+  const [viewMode, setViewMode] = useState('split'); // 'split' | 'unified'
 
   // Load initial pair (main PRD vs temp draft)
   useEffect(() => {
@@ -85,6 +86,14 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave }) => {
 
   const canUndo = history.length > 0;
   const hasChanges = useMemo(() => diff.some(d => d.type !== 'unchanged'), [diff]);
+
+  // Compute structured patch hunks for split view (with N context lines)
+  const hunks = useMemo(() => {
+    const oldStr = leftLines.join('\n');
+    const newStr = rightLines.join('\n');
+    const patch = structuredPatch('old', 'new', oldStr, newStr, '', '', { context: 3 });
+    return patch.hunks || [];
+  }, [leftLines, rightLines]);
 
   // Helpers to push snapshot and restore
   const pushSnapshot = () => {
@@ -147,6 +156,80 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave }) => {
     }
   };
 
+  // Build array of lines for new/old blocks from a hunk
+  const getHunkNewBlock = (hunk) => hunk.lines
+    .filter(l => l[0] === ' ' || l[0] === '+')
+    .map(l => l.slice(1));
+  const getHunkOldBlock = (hunk) => hunk.lines
+    .filter(l => l[0] === ' ' || l[0] === '-')
+    .map(l => l.slice(1));
+
+  // Accept entire hunk: replace left slice with the hunk's new block
+  const handleAcceptHunk = (hunkIdx) => {
+    const h = hunks[hunkIdx];
+    if (!h) return;
+    pushSnapshot();
+    const insert = getHunkNewBlock(h);
+    const start = Math.max(0, (h.oldStart || 1) - 1);
+    const del = Math.max(0, h.oldLines || 0);
+    setLeftLines(prev => {
+      const next = prev.slice();
+      next.splice(start, del, ...insert);
+      return next;
+    });
+  };
+
+  // Reject entire hunk: replace right slice with the hunk's old block
+  const handleRejectHunk = (hunkIdx) => {
+    const h = hunks[hunkIdx];
+    if (!h) return;
+    pushSnapshot();
+    const insert = getHunkOldBlock(h);
+    const start = Math.max(0, (h.newStart || 1) - 1);
+    const del = Math.max(0, h.newLines || 0);
+    setRightLines(prev => {
+      const next = prev.slice();
+      next.splice(start, del, ...insert);
+      return next;
+    });
+  };
+
+  // Accept/Reject all changes quickly
+  const handleAcceptAll = () => {
+    pushSnapshot();
+    setLeftLines(rightLines.slice());
+  };
+  const handleRejectAll = () => {
+    pushSnapshot();
+    setRightLines(leftLines.slice());
+  };
+
+  // Convert a hunk's lines into side-by-side rows
+  const hunkRows = (h) => {
+    const rows = [];
+    for (let i = 0; i < h.lines.length; i++) {
+      const line = h.lines[i];
+      const tag = line[0];
+      const text = line.slice(1);
+      if (tag === ' ') {
+        rows.push({ left: text, right: text, type: 'context' });
+      } else if (tag === '-') {
+        const nxt = h.lines[i + 1];
+        if (nxt && nxt[0] === '+') {
+          rows.push({ left: text, right: nxt.slice(1), type: 'modify' });
+          i++;
+        } else {
+          rows.push({ left: text, right: '', type: 'remove' });
+        }
+      } else if (tag === '+') {
+        rows.push({ left: '', right: text, type: 'add' });
+      } else {
+        // ignore '?' meta lines
+      }
+    }
+    return rows;
+  };
+
   // Save the merged working document (left)
   const handleSave = () => {
     setSaving(true);
@@ -173,34 +256,77 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave }) => {
 
   return (
     <div className="prd-diff-panel">
-      <h2>Review PRD Changes (Unified Diff)</h2>
-      <div className="diff-unified-view">
-        <pre style={{ background: '#f7f7f7', padding: 12, borderRadius: 6 }}>
-          {diff.map((d, idx) => {
-            const bg = d.type === 'added' ? '#e6ffed' : d.type === 'removed' ? '#ffeef0' : 'transparent';
-            const textColor = d.type === 'added' ? '#22863a' : d.type === 'removed' ? '#b31d28' : '#24292e';
-            const lineNum = d.type === 'added' ? '+' + d.newLine : d.type === 'removed' ? '-' + d.oldLine : ' ' + d.oldLine;
-            return (
-              <div key={idx} style={{ display: 'flex', alignItems: 'center', background: bg }}>
-                <span style={{ width: 40, color: '#888', userSelect: 'none' }}>{lineNum}</span>
-                <span style={{ color: textColor, whiteSpace: 'pre-wrap', flex: 1 }}>{d.value}</span>
-                {d.type !== 'unchanged' && (
-                  <span style={{ marginLeft: 8 }}>
-                    <button
-                      style={{ marginRight: 4, background: '#e6ffed', border: '1px solid #22863a', color: '#22863a', borderRadius: 3, cursor: 'pointer' }}
-                      onClick={() => handleAccept(idx)}
-                    >Accept</button>
-                    <button
-                      style={{ background: '#ffeef0', border: '1px solid #b31d28', color: '#b31d28', borderRadius: 3, cursor: 'pointer' }}
-                      onClick={() => handleReject(idx)}
-                    >Reject</button>
-                  </span>
-                )}
-              </div>
-            );
-          })}
-        </pre>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <h2>Review PRD Changes</h2>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => setViewMode(v => v === 'split' ? 'unified' : 'split')}>
+            {viewMode === 'split' ? 'Switch to Unified' : 'Switch to Split'}
+          </button>
+          <button onClick={handleAcceptAll} title="Accept all proposed changes">Accept All</button>
+          <button onClick={handleRejectAll} title="Reject all proposed changes">Reject All</button>
+        </div>
       </div>
+
+      {viewMode === 'split' ? (
+        <div className="diff-split-view" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {hunks.map((h, i) => (
+            <div key={i} style={{ border: '1px solid #ddd', borderRadius: 6, overflow: 'hidden' }}>
+              <div style={{ background: '#f1f8ff', padding: '6px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ fontFamily: 'monospace' }}>{`@@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@`}</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => handleAcceptHunk(i)} style={{ background: '#e6ffed', border: '1px solid #22863a', color: '#22863a', borderRadius: 3 }}>Accept Hunk</button>
+                  <button onClick={() => handleRejectHunk(i)} style={{ background: '#ffeef0', border: '1px solid #b31d28', color: '#b31d28', borderRadius: 3 }}>Reject Hunk</button>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', fontFamily: 'monospace' }}>
+                <div style={{ padding: 8, borderRight: '1px solid #eee', background: '#fafbfc' }}>
+                  {hunkRows(h).map((r, idx) => (
+                    <div key={idx} style={{ background: r.type === 'add' ? 'transparent' : r.type === 'remove' ? '#ffeef0' : r.type === 'modify' ? '#ffeef0' : 'transparent', color: r.type === 'remove' || r.type === 'modify' ? '#b31d28' : '#24292e', whiteSpace: 'pre-wrap' }}>
+                      {r.left}
+                    </div>
+                  ))}
+                </div>
+                <div style={{ padding: 8, background: '#fafbfc' }}>
+                  {hunkRows(h).map((r, idx) => (
+                    <div key={idx} style={{ background: r.type === 'add' ? '#e6ffed' : r.type === 'modify' ? '#e6ffed' : 'transparent', color: r.type === 'add' || r.type === 'modify' ? '#22863a' : '#24292e', whiteSpace: 'pre-wrap' }}>
+                      {r.right}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="diff-unified-view">
+          <pre style={{ background: '#f7f7f7', padding: 12, borderRadius: 6 }}>
+            {diff.map((d, idx) => {
+              const bg = d.type === 'added' ? '#e6ffed' : d.type === 'removed' ? '#ffeef0' : 'transparent';
+              const textColor = d.type === 'added' ? '#22863a' : d.type === 'removed' ? '#b31d28' : '#24292e';
+              const lineNum = d.type === 'added' ? '+' + d.newLine : d.type === 'removed' ? '-' + d.oldLine : ' ' + d.oldLine;
+              return (
+                <div key={idx} style={{ display: 'flex', alignItems: 'center', background: bg }}>
+                  <span style={{ width: 40, color: '#888', userSelect: 'none' }}>{lineNum}</span>
+                  <span style={{ color: textColor, whiteSpace: 'pre-wrap', flex: 1 }}>{d.value}</span>
+                  {d.type !== 'unchanged' && (
+                    <span style={{ marginLeft: 8 }}>
+                      <button
+                        style={{ marginRight: 4, background: '#e6ffed', border: '1px solid #22863a', color: '#22863a', borderRadius: 3, cursor: 'pointer' }}
+                        onClick={() => handleAccept(idx)}
+                      >Accept</button>
+                      <button
+                        style={{ background: '#ffeef0', border: '1px solid #b31d28', color: '#b31d28', borderRadius: 3, cursor: 'pointer' }}
+                        onClick={() => handleReject(idx)}
+                      >Reject</button>
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </pre>
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
         <button onClick={handleUndo} disabled={!canUndo} style={{ padding: '8px 16px' }}>Undo</button>
         <button onClick={handleSave} disabled={saving} style={{ padding: '8px 20px', fontWeight: 'bold', background: '#0366d6', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
