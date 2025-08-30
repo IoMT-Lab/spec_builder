@@ -942,6 +942,9 @@ app.get('/api/sessions/:id/prd/diff', (req, res) => {
     // If no temp, show main PRD as both old and new (or new as blank for initial diff)
     newText = oldText; // or set to '' for blank diff
   }
+  try {
+    console.log('[PRD DIFF] hasTemp=%s oldLen=%d newLen=%d', hasTemp, oldText.length, newText.length);
+  } catch {}
   res.set('Cache-Control', 'no-store');
   res.json({ oldText, newText, hasTemp });
 });
@@ -957,6 +960,9 @@ app.post('/api/sessions/:id/prd/merge', (req, res) => {
   const tempPath = path.join(__dirname, '..', 'Documents', `PRD_${sessionId}_temp.md`);
   fs.writeFileSync(prdPath, mergedText, 'utf-8');
   if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+  try {
+    console.log('[PRD MERGE] Saved mergedText length=%d and removed temp=%s', mergedText.length, fs.existsSync(tempPath) ? 'false' : 'true');
+  } catch {}
   // Also update session.prdDraft if session exists
   const sessionFile = path.join(sessionsDir, `${sessionId}.json`);
   if (fs.existsSync(sessionFile)) {

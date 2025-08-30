@@ -68,6 +68,10 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave, onDiffStateChange }) => {
         setRightLines(right);
         setHistory([]);
         setLoading(false);
+        try {
+          // eslint-disable-next-line no-console
+          console.info(`[PRD DEBUG] Diff fetch: hasTemp=${Boolean(data.hasTemp)} leftLines=${left.length} rightLines=${right.length}`);
+        } catch {}
         if (typeof onDiffStateChange === 'function') onDiffStateChange(Boolean(data.hasTemp));
       })
       .catch(e => {
@@ -89,6 +93,11 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave, onDiffStateChange }) => {
     if (!hasTemp) { setDiff([]); return; }
     const next = computeUnifiedDiff(leftLines, rightLines);
     setDiff(next);
+    try {
+      const changes = next.filter(d => d.type !== 'unchanged').length;
+      // eslint-disable-next-line no-console
+      console.info(`[PRD DEBUG] Diff recomputed: hasTemp=${hasTemp} changes=${changes} (left=${leftLines.length}, right=${rightLines.length})`);
+    } catch {}
   }, [leftLines, rightLines, hasTemp]);
 
   const canUndo = history.length > 0;
@@ -123,6 +132,7 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave, onDiffStateChange }) => {
     const d = diff[idx];
     if (!d || d.type === 'unchanged') return;
     pushSnapshot();
+    try { console.debug('[PRD DEBUG] Accept line change at index', idx, d.type); } catch {}
     if (d.type === 'added') {
       // Bring the proposed line into the working doc (insert into left at oldPos)
       setLeftLines(prev => {
@@ -145,6 +155,7 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave, onDiffStateChange }) => {
     const d = diff[idx];
     if (!d || d.type === 'unchanged') return;
     pushSnapshot();
+    try { console.debug('[PRD DEBUG] Reject line change at index', idx, d.type); } catch {}
     if (d.type === 'added') {
       // Reject the addition: remove from right at newPos
       setRightLines(prev => {
@@ -176,6 +187,7 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave, onDiffStateChange }) => {
     const h = hunks[hunkIdx];
     if (!h) return;
     pushSnapshot();
+    try { console.debug('[PRD DEBUG] Accept hunk', hunkIdx, `oldStart=${h.oldStart}, newStart=${h.newStart}`); } catch {}
     const insert = getHunkNewBlock(h);
     const start = Math.max(0, (h.oldStart || 1) - 1);
     const del = Math.max(0, h.oldLines || 0);
@@ -191,6 +203,7 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave, onDiffStateChange }) => {
     const h = hunks[hunkIdx];
     if (!h) return;
     pushSnapshot();
+    try { console.debug('[PRD DEBUG] Reject hunk', hunkIdx, `oldStart=${h.oldStart}, newStart=${h.newStart}`); } catch {}
     const insert = getHunkOldBlock(h);
     const start = Math.max(0, (h.newStart || 1) - 1);
     const del = Math.max(0, h.newLines || 0);
@@ -203,12 +216,45 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave, onDiffStateChange }) => {
 
   // Accept/Reject all changes quickly
   const handleAcceptAll = () => {
+    // Bring all proposed lines into the working doc, then immediately finalize
+    // so the temp draft is removed and the UI returns to Markdown view.
     pushSnapshot();
+    try { console.info('[PRD DEBUG] Accept ALL changes'); } catch {}
+    const mergedText = rightLines.join('\n');
     setLeftLines(rightLines.slice());
+    setSaving(true);
+    fetch(`/api/sessions/${sessionId}/prd/merge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mergedText })
+    })
+      .then(r => r.json())
+      .then(data => {
+        setSaving(false);
+        if (data.ok) {
+          setHistory([]);
+          if (typeof onDiffStateChange === 'function') onDiffStateChange(false);
+          if (onSave) onSave();
+          try { console.info('[PRD DEBUG] Accept ALL finalized; backend ok=true'); } catch {}
+        }
+      })
+      .catch(e => { setError('Failed to save'); setSaving(false); });
   };
   const handleRejectAll = () => {
+    // Discard the entire proposal: remove the temp draft on the server
     pushSnapshot();
-    setRightLines(leftLines.slice());
+    try { console.info('[PRD DEBUG] Reject ALL changes'); } catch {}
+    setSaving(true);
+    fetch(`/api/sessions/${sessionId}/prd/reject`, { method: 'POST' })
+      .then(r => r.json())
+      .then(data => {
+        setSaving(false);
+        setHistory([]);
+        if (typeof onDiffStateChange === 'function') onDiffStateChange(false);
+        if (onSave) onSave();
+        try { console.info('[PRD DEBUG] Reject ALL completed; backend ok=true'); } catch {}
+      })
+      .catch(e => { setError('Failed to save'); setSaving(false); });
   };
 
   // Convert a hunk's lines into side-by-side rows
@@ -241,6 +287,7 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave, onDiffStateChange }) => {
   const handleSave = () => {
     setSaving(true);
     const mergedText = leftLines.join('\n');
+    try { console.info('[PRD DEBUG] Finalize & Save PRD (mergedText length)', mergedText.length); } catch {}
     fetch(`/api/sessions/${sessionId}/prd/merge`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -252,6 +299,7 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave, onDiffStateChange }) => {
         if (data.ok) {
           setHistory([]);
           if (onSave) onSave();
+          try { console.info('[PRD DEBUG] Merge saved; backend reported ok=true'); } catch {}
         }
       })
       .catch(e => { setError('Failed to save'); setSaving(false); });
@@ -263,8 +311,35 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave, onDiffStateChange }) => {
   if (error) {
     return <div style={{ color: 'red' }}>{error}</div>;
   }
-  if (!hasTemp || !hasChanges) {
-    return null; // Hide panel when there are no differences
+  if (!hasTemp) {
+    return null;
+  }
+  if (!hasChanges) {
+    try {
+      // eslint-disable-next-line no-console
+      console.info(`[PRD DEBUG] No visible differences: hasTemp=${hasTemp}. Showing placeholder instead of blank panel.`);
+    } catch {}
+    return (
+      <div className="prd-diff-panel">
+        <h2>Review PRD Changes</h2>
+        <div style={{
+          border: '1px solid #ddd',
+          background: '#fffceb',
+          color: '#6b5900',
+          padding: 12,
+          borderRadius: 6,
+          marginBottom: 12
+        }}>
+          No differences to review right now, but a temp PRD exists. This can occur briefly while the diff recomputes or after accepting all changes. You can finalize to exit review.
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={handleSave} disabled={saving} style={{ padding: '8px 20px', fontWeight: 'bold', background: '#0366d6', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+            {saving ? 'Saving...' : 'Finalize & Save PRD'}
+          </button>
+          <button onClick={handleRejectAll} style={{ padding: '8px 16px' }}>Reject All</button>
+        </div>
+      </div>
+    );
   }
 
   return (

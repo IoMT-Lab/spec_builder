@@ -50,6 +50,15 @@ function App() {
   const [markdownRefreshKey, setMarkdownRefreshKey] = useState(0);
   const [hasPendingChanges, setHasPendingChanges] = useState(false);
 
+  // Debug: track when pending-changes flag flips and what the UI will show
+  useEffect(() => {
+    const mode = hasPendingChanges ? 'diff-review' : 'markdown-view';
+    try {
+      // eslint-disable-next-line no-console
+      console.info(`[PRD DEBUG] hasPendingChanges=${hasPendingChanges} → UI mode=${mode}`);
+    } catch {}
+  }, [hasPendingChanges]);
+
   useEffect(() => {
     if (menuBarRef.current) {
       const rect = menuBarRef.current.getBoundingClientRect();
