@@ -33,6 +33,10 @@ function createSession({ projectDescription, industryDomain = '', projectType = 
     cursor: { sectionIndex: 0, fieldIndex: 0 },
     focusStack: [], // [{ type, topic, turnsLeft, depth }]
     consecutiveDigressions: 0,
+    // Working memory for facts before confirmation
+    notes: {}, // key: `${sectionIndex}:${fieldIndex}` -> [facts]
+    awaitingConfirmation: null, // { sectionIndex, fieldIndex, summaryText, createdAt }
+    lastSummaryAt: null,
   };
   // Persist initial session JSON
   try {

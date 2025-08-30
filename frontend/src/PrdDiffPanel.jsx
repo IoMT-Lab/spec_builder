@@ -46,6 +46,7 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave, onDiffStateChange }) => {
   const [error, setError] = useState(null);
   const [history, setHistory] = useState([]); // stack of { left, right }
   const [viewMode, setViewMode] = useState('split'); // 'split' | 'unified'
+  const [hasTemp, setHasTemp] = useState(false);
 
   // Load initial pair (main PRD vs temp draft)
   useEffect(() => {
@@ -61,10 +62,12 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave, onDiffStateChange }) => {
         if (cancelled) return;
         const left = splitLines(data.oldText || '');
         const right = splitLines(data.newText || '');
+        setHasTemp(Boolean(data.hasTemp));
         setLeftLines(left);
         setRightLines(right);
         setHistory([]);
         setLoading(false);
+        if (typeof onDiffStateChange === 'function') onDiffStateChange(Boolean(data.hasTemp));
       })
       .catch(e => {
         if (cancelled) return;
@@ -75,19 +78,17 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave, onDiffStateChange }) => {
         setHistory([]);
         setError('No PRD changes to review yet.');
         setLoading(false);
+        if (typeof onDiffStateChange === 'function') onDiffStateChange(false);
       });
     return () => { cancelled = true; };
   }, [sessionId, refreshKey]);
 
-  // Recompute diff whenever left/right change and notify parent (only after load completes)
+  // Recompute diff whenever left/right change (only when a temp proposal exists)
   useEffect(() => {
+    if (!hasTemp) { setDiff([]); return; }
     const next = computeUnifiedDiff(leftLines, rightLines);
     setDiff(next);
-    if (!loading && typeof onDiffStateChange === 'function') {
-      const has = next.some(d => d.type !== 'unchanged');
-      onDiffStateChange(has);
-    }
-  }, [leftLines, rightLines, loading]);
+  }, [leftLines, rightLines, hasTemp]);
 
   const canUndo = history.length > 0;
   const hasChanges = useMemo(() => diff.some(d => d.type !== 'unchanged'), [diff]);
@@ -261,7 +262,7 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave, onDiffStateChange }) => {
   if (error) {
     return <div style={{ color: 'red' }}>{error}</div>;
   }
-  if (!hasChanges) {
+  if (!hasTemp || !hasChanges) {
     return null; // Hide panel when there are no differences
   }
 

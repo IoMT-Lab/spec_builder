@@ -19,6 +19,8 @@ function App() {
   const [userInput, setUserInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [awaitingConfirm, setAwaitingConfirm] = useState(null); // { sectionIndex, fieldIndex, summaryText }
+  const [creatingSession, setCreatingSession] = useState(false);
   const [infoMsg, setInfoMsg] = useState('');
   const menuBarRef = useRef(null);
   const [menuBarRect, setMenuBarRect] = useState(null);
@@ -91,12 +93,12 @@ function App() {
     }
   }, [sessions]);
 
-  // Fetch conversation for current session
+  // Fetch conversation for current session (only once real id exists)
   useEffect(() => {
-    if (currentSession) {
+    if (currentSession && !String(currentSession.id || '').startsWith('tmp-')) {
       fetch(`/api/sessions/${currentSession.id}`)
         .then(res => res.json())
-        .then(session => setConversation(session.conversation || []))
+        .then(session => { setConversation(session.conversation || []); setAwaitingConfirm(session.awaitingConfirmation || null); })
         .catch(() => setConversation([]));
     } else {
       setConversation([]);
@@ -118,16 +120,16 @@ function App() {
     },
   ];
 
-  // Send message for current session
-  const handleSend = async () => {
-    if (!userInput.trim() || !currentSession) return;
+  // Core send helper to send arbitrary content
+  const sendMessage = async (content) => {
+    if (!content.trim() || !currentSession) return;
     setLoading(true);
     // Call LLM endpoint
     const res = await fetch('/api/llm', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        input: userInput,
+        input: content,
         llm: llmProvider,
         sessionId: currentSession.id
       })
@@ -144,14 +146,31 @@ function App() {
     const sessionRes = await fetch(`/api/sessions/${currentSession.id}`);
     const sessionData = await sessionRes.json();
     setConversation(sessionData.conversation || []);
-    setUserInput('');
+    setAwaitingConfirm(sessionData.awaitingConfirmation || null);
     setLoading(false);
+  };
+
+  // Send message for current session from input
+  const handleSend = async () => {
+    await sendMessage(userInput);
+    setUserInput('');
   };
 
   const handleInputKeyDown = (e) => {
     if (e.key === 'Enter' && !loading) {
       handleSend();
     }
+  };
+
+  // Quick confirm/disagree buttons
+  const handleConfirmApply = async () => {
+    await sendMessage('Looks right, please apply this to the PRD.');
+  };
+  const handleNeedsChanges = () => {
+    const prefill = awaitingConfirm?.summaryText ? `Not quite. ${awaitingConfirm.summaryText}\n\nUpdate: ` : 'Not quite. ';
+    setUserInput(prefill);
+    const inputEl = document.querySelector('.user-input');
+    if (inputEl) setTimeout(() => inputEl.focus(), 0);
   };
 
   const handleCheckApiKey = async () => {
@@ -195,7 +214,9 @@ function App() {
 
   // Create new session
   const handleNewSession = async () => {
+    if (creatingSession) return;
     try {
+      setCreatingSession(true);
       // Prompt for title (fallback to default if blocked/cancelled)
       let title = undefined;
       try { title = prompt('Enter a title for the new session:'); } catch {}
@@ -229,27 +250,12 @@ function App() {
       setSessions(prev => prev.map(s => s.id === tempId ? serverSession : s));
       setCurrentSession(serverSession);
 
-      // Kick off initial assistant message (non-blocking)
-      try {
-        const llmRes = await fetch('/api/llm', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ input: '', llm: llmProvider, sessionId: serverSession.id })
-        });
-        const llmData = await llmRes.json();
-        // Refresh conversation from server (LLM endpoint already persists it)
-        try {
-          const sessionRes = await fetch(`/api/sessions/${serverSession.id}`);
-          const sessionData = await sessionRes.json();
-          setConversation(sessionData.conversation || []);
-        } catch {}
-        if (llmData.error) setErrorMsg(llmData.error + (llmData.details ? `\n${llmData.details.stderr || llmData.details}` : ''));
-      } catch (e) {
-        // Non-fatal; surface minimal info
-        console.warn('Initial LLM message failed:', e);
-      }
+      // No automatic LLM kickoff; wait for the user's first message
     } catch (err) {
       console.error('New session failed:', err);
       setErrorMsg('Failed to create session. Is the backend running?');
+    } finally {
+      setCreatingSession(false);
     }
   };
 
@@ -326,8 +332,9 @@ function App() {
           <button
             type="button"
             className="new-session-btn"
-            onMouseDown={(e)=>{ e.preventDefault(); e.stopPropagation(); handleNewSession(); }}
             onClick={handleNewSession}
+            disabled={creatingSession}
+            title={creatingSession ? 'Creating session…' : 'New session'}
           >+
           </button>
           <button className="close-sidebar-btn" onClick={() => setSidebarOpen(false)} style={{marginLeft: 8}}>&times;</button>
@@ -499,18 +506,35 @@ function App() {
                     </div>
                   )}
                   {conversation.length === 0 && !loading && 'LLM Replies go here'}
-                  {conversation.map((msg, idx) => (
-                    <div key={idx} className={msg.role === 'user' ? 'user-msg' : 'assistant-msg'} style={{ textAlign: msg.role === 'user' ? 'right' : 'left', margin: '8px 0' }}>
-                      <b>{msg.role === 'user' ? 'You' : 'LLM'}:</b> {msg.content}
+                  {conversation.map((msg, idx) => {
+                    // Highlight user message spans that were extracted as facts
+                    const spans = Array.isArray(msg.facts)
+                      ? Array.from(new Set(msg.facts.map(f => (f && typeof f.exact_span === 'string' && f.exact_span.trim()) ? f.exact_span.trim() : (f && typeof f.text === 'string' ? f.text.trim() : '')).filter(Boolean)))
+                      : [];
+                    const content = String(msg.content || '');
+                    const parts = highlightSpans(content, spans);
+                    return (
+                      <div key={idx} className={msg.role === 'user' ? 'user-msg' : 'assistant-msg'} style={{ textAlign: msg.role === 'user' ? 'right' : 'left', margin: '8px 0' }}>
+                        <b>{msg.role === 'user' ? 'You' : 'LLM'}:</b> {msg.role === 'user' ? parts : content}
+                      </div>
+                    );
+                  })}
+                  {awaitingConfirm && (
+                    <div className="summary-card" style={{ border: '1px solid #ddd', padding: 12, borderRadius: 6, background: '#f9fafb', marginTop: 8 }}>
+                      <div style={{ marginBottom: 8, whiteSpace: 'pre-wrap' }}>{awaitingConfirm.summaryText}</div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button onClick={handleConfirmApply} style={{ background: '#e6ffed', border: '1px solid #22863a', color: '#22863a', borderRadius: 3, padding: '6px 12px' }}>Looks right</button>
+                        <button onClick={handleNeedsChanges} style={{ background: '#ffeef0', border: '1px solid #b31d28', color: '#b31d28', borderRadius: 3, padding: '6px 12px' }}>Needs changes</button>
+                      </div>
                     </div>
-                  ))}
+                  )}
                   {loading && <div>Loading...</div>}
                 </div>
               </section>
               <div className="markdown-panel">
                 <div className="markdown-panel-content">
                   {/* Single-display rule: show either review (diff) or the main Markdown */}
-                  {currentSession && hasPendingChanges ? (
+                  {currentSession && !String(currentSession.id || '').startsWith('tmp-') && hasPendingChanges ? (
                     <PrdDiffPanel
                       sessionId={currentSession.id}
                       refreshKey={prdDiffRefreshKey}
@@ -520,7 +544,7 @@ function App() {
                   ) : (
                     <>
                       {/* Mount a hidden diff panel to detect pending changes without showing it */}
-                      {currentSession && (
+                      {currentSession && !String(currentSession.id || '').startsWith('tmp-') && (
                         <div style={{ display: 'none' }}>
                           <PrdDiffPanel
                             sessionId={currentSession.id}
@@ -531,7 +555,7 @@ function App() {
                         </div>
                       )}
                       <MarkdownPanel
-                        sessionId={currentSession ? currentSession.id : null}
+                        sessionId={currentSession && !String(currentSession.id || '').startsWith('tmp-') ? currentSession.id : null}
                         onSave={handlePrdSave}
                         refreshKey={markdownRefreshKey}
                       />
@@ -564,3 +588,43 @@ function App() {
 }
 
 export default App;
+
+// --- Utilities ---
+function highlightSpans(text, spans) {
+  if (!spans || spans.length === 0 || !text) return text;
+  const ranges = [];
+  const lower = text.toLowerCase();
+  for (const span of spans) {
+    const needle = span.toLowerCase();
+    if (!needle) continue;
+    let start = 0;
+    while (true) {
+      const idx = lower.indexOf(needle, start);
+      if (idx === -1) break;
+      ranges.push({ start: idx, end: idx + needle.length });
+      start = idx + needle.length;
+    }
+  }
+  if (ranges.length === 0) return text;
+  // Merge overlapping ranges
+  ranges.sort((a, b) => a.start - b.start || a.end - b.end);
+  const merged = [];
+  for (const r of ranges) {
+    if (merged.length === 0 || r.start > merged[merged.length - 1].end) {
+      merged.push({ ...r });
+    } else {
+      merged[merged.length - 1].end = Math.max(merged[merged.length - 1].end, r.end);
+    }
+  }
+  const out = [];
+  let cursor = 0;
+  merged.forEach((r, i) => {
+    if (cursor < r.start) out.push(<span key={`t-${i}-${cursor}`}>{text.slice(cursor, r.start)}</span>);
+    out.push(
+      <mark key={`m-${i}-${r.start}`} style={{ background: '#fff3cd', padding: '0 2px', borderRadius: 2 }}>{text.slice(r.start, r.end)}</mark>
+    );
+    cursor = r.end;
+  });
+  if (cursor < text.length) out.push(<span key={`t-end-${cursor}`}>{text.slice(cursor)}</span>);
+  return out;
+}

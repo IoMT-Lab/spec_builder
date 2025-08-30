@@ -29,6 +29,7 @@ const MAX_DEEP_DIVE_DEPTH = 2;
 const MAX_TURNS_PER_FOCUS = 2;
 const MAX_CONSECUTIVE_DIGRESSIONS = 2;
 const MIN_CONTENT_LENGTH = 40; // characters threshold between weak and covered
+const FACTS_THRESHOLD = 2; // number of facts before we summarize/confirm
 
 // Parse PRD markdown into coverage map using PRD_SECTIONS
 function parsePrdCoverage(prdMarkdown) {
@@ -118,6 +119,35 @@ function detectIntent(text = '') {
   if (/(example|examples|sample)/.test(t)) return { type: 'examples' };
   if (/(why|how|detail|deeper|explain|more)/.test(t)) return { type: 'deep_dive' };
   return { type: 'on_topic' };
+}
+
+function detectConfirmation(text = '') {
+  const t = String(text).toLowerCase();
+  return /(yes|looks good|sounds good|agree|approved|go ahead|apply|write it up|update the prd|confirm|that's correct|thats correct|correct|proceed)/.test(t);
+}
+
+function detectDisagree(text = '') {
+  const t = String(text).toLowerCase();
+  return /(no|not quite|disagree|change|adjust|revise|that's wrong|thats wrong|needs changes|edit|modify)/.test(t);
+}
+
+function notesKey(si, fi) { return `${si}:${fi}`; }
+
+function addFactsToNotes(session, si, fi, facts = []) {
+  if (!session) return;
+  session.notes = session.notes || {};
+  const key = notesKey(si, fi);
+  const arr = Array.isArray(session.notes[key]) ? session.notes[key] : [];
+  const set = new Set(arr);
+  for (const f of facts) {
+    const s = String(f || '').trim();
+    if (s) set.add(s);
+  }
+  session.notes[key] = Array.from(set).slice(-20);
+}
+
+function getNotes(session, si, fi) {
+  return (session && session.notes && session.notes[notesKey(si, fi)]) || [];
 }
 
 function pushFocus(session, type, topic) {
@@ -211,6 +241,9 @@ app.post('/api/llm', async (req, res) => {
   // Always call the LLM script, regardless of state
   try {
     const scriptPath = path.join(__dirname, '..', 'llm', 'conversation_flow.py');
+    // If a pending temp PRD exists, avoid drafting and steer user to review
+    const tempPathExisting = path.join(__dirname, '..', 'Documents', `PRD_${sessionId}_temp.md`);
+    const hasPendingTemp = fs.existsSync(tempPathExisting);
     // Initialize structure state
     session.cursor = session.cursor || { sectionIndex: 0, fieldIndex: 0 };
     session.focusStack = Array.isArray(session.focusStack) ? session.focusStack : [];
@@ -232,6 +265,15 @@ app.post('/api/llm', async (req, res) => {
     else if (intent.type === 'deep_dive') pushFocus(session, 'deep_dive', curNames.fieldName || curNames.sectionName);
     const userRequestedAdvance = intent.type === 'advance';
 
+    // Confirmation handling
+    const isConfirm = detectConfirmation(userInput);
+    const isDisagree = detectDisagree(userInput);
+    const awaiting = session.awaitingConfirmation;
+    if (awaiting && isDisagree) {
+      // Keep awaiting, we'll gather more
+      session.awaitingConfirmation = awaiting;
+    }
+
     // Build structure guidance system message (ephemeral)
     const agenda = PRD_SECTIONS.map(s => ({ name: s.name, fields: s.fields }));
     const structureMsg = buildStructureSystemMessage({ agenda, nextFocus, cursor: session.cursor, focusStack: session.focusStack });
@@ -248,8 +290,8 @@ app.post('/api/llm', async (req, res) => {
       llm,
       // Anchor proposals to the accepted PRD on disk
       prdDraft: acceptedPrd || '',
-      // Gate drafting on non-empty input; keep reply generation
-      shouldDraft: Boolean(userInput && userInput.trim()),
+      // Draft only after explicit confirmation, and never while a review is pending
+      shouldDraft: Boolean(!hasPendingTemp && awaiting && isConfirm),
       // Lower temperature for PRD drafting to reduce arbitrary domain jumps
       temps: { reply: 0.6, draft: 0.2 },
       structure: {
@@ -262,8 +304,60 @@ app.post('/api/llm', async (req, res) => {
     });
     // Print whether scriptResult.prdDraft is truthy or not
     console.log('scriptResult.prdDraft is', scriptResult.prdDraft ? 'truthy' : 'falsy', '| Value:', scriptResult.prdDraft);
-    // Save LLM reply and PRD draft
-    session.conversation.push({ role: 'assistant', content: scriptResult.reply });
+    // Planner decision + notes accumulation
+    const planner = scriptResult.planner || {};
+    const target = (Array.isArray(planner.targets) && planner.targets[0]) || { sectionIndex: nextFocus.sectionIndex, fieldIndex: nextFocus.fieldIndex };
+    const extractedFacts = Array.isArray(scriptResult.facts) ? scriptResult.facts : [];
+    try { console.log('[FACTS]', extractedFacts.length, extractedFacts); } catch {}
+    // Determine facts strings to record (prefer exact_span then text)
+    const factStrings = [];
+    for (const f of extractedFacts) {
+      if (!f) continue;
+      const s = (typeof f.exact_span === 'string' && f.exact_span.trim()) ? f.exact_span.trim() : (typeof f.text === 'string' ? f.text.trim() : '');
+      if (s) factStrings.push(s);
+    }
+    // Previous count for adaptive threshold
+    const prevCount = getNotes(session, target.sectionIndex, target.fieldIndex).length;
+    addFactsToNotes(session, target.sectionIndex, target.fieldIndex, planner.facts || []);
+    addFactsToNotes(session, target.sectionIndex, target.fieldIndex, factStrings);
+    const factsNow = getNotes(session, target.sectionIndex, target.fieldIndex);
+    const newFactsAddedCount = Math.max(0, factsNow.length - prevCount);
+
+    // Decide assistant content (summary gate or normal reply)
+    let assistantContent = scriptResult.reply || '';
+    const firstTurnForField = prevCount === 0;
+    const shouldSummarize = !session.awaitingConfirmation && !hasPendingTemp && (
+      planner.action === 'summarize' || planner.action === 'confirm_gate' ||
+      (firstTurnForField && newFactsAddedCount >= 1) || (!firstTurnForField && factsNow.length >= FACTS_THRESHOLD)
+    );
+    if (hasPendingTemp) {
+      assistantContent = 'You have pending PRD changes to review. Please accept or discard them before continuing.';
+    } else if (shouldSummarize) {
+      const names = idxToNames(target.sectionIndex, target.fieldIndex);
+      const summaryText = (planner.summary && String(planner.summary).trim())
+        ? planner.summary.trim()
+        : `Here is my understanding so far for ${names.sectionName} → ${names.fieldName}:\n- ${factsNow.join('\n- ')}\n\nDoes this look right to include in the PRD?`;
+      assistantContent = summaryText;
+      session.awaitingConfirmation = {
+        sectionIndex: target.sectionIndex,
+        fieldIndex: target.fieldIndex,
+        summaryText,
+        createdAt: new Date().toISOString(),
+      };
+      session.lastSummaryAt = new Date().toISOString();
+    } else if (awaiting && isConfirm && !hasPendingTemp) {
+      // Clear awaiting on confirmation; drafting for this turn is already turned on
+      session.awaitingConfirmation = null;
+    }
+    // Attach facts to the last user message for UI highlighting
+    try {
+      let idx = session.conversation.length - 1;
+      while (idx >= 0 && session.conversation[idx].role !== 'user') idx--;
+      if (idx >= 0) {
+        session.conversation[idx].facts = extractedFacts;
+      }
+    } catch {}
+    session.conversation.push({ role: 'assistant', content: assistantContent });
     // Normalize helper to reduce spurious diffs
     const normalizeMd = (s) => String(s || '')
       .replace(/\r\n/g, '\n')            // normalize EOLs
@@ -279,7 +373,8 @@ app.post('/api/llm', async (req, res) => {
     const proposed = typeof scriptResult.prdDraft === 'string' ? scriptResult.prdDraft : '';
     const nProposed = normalizeMd(proposed);
     const nAccepted = normalizeMd(acceptedPrd);
-    const hasPrdChanges = Boolean(nProposed && nProposed !== nAccepted);
+    let hasPrdChanges = Boolean(nProposed && nProposed !== nAccepted);
+    if (hasPendingTemp) hasPrdChanges = true;
     if (hasPrdChanges) {
       fs.writeFileSync(tempPrdPath, proposed, 'utf-8');
     } else {
@@ -701,13 +796,14 @@ app.get('/api/sessions/:id/prd/diff', (req, res) => {
   if (fs.existsSync(prdPath)) {
     oldText = fs.readFileSync(prdPath, 'utf-8');
   }
-  if (fs.existsSync(tempPath)) {
+  const hasTemp = fs.existsSync(tempPath);
+  if (hasTemp) {
     newText = fs.readFileSync(tempPath, 'utf-8');
   } else {
     // If no temp, show main PRD as both old and new (or new as blank for initial diff)
     newText = oldText; // or set to '' for blank diff
   }
-  res.json({ oldText, newText });
+  res.json({ oldText, newText, hasTemp });
 });
 
 // PRD merge endpoint (save mergedText as session PRD and remove temp draft)
