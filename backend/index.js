@@ -3,6 +3,7 @@ const fetchModule = require('node-fetch');
 const fetch = fetchModule.default || fetchModule;
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 require('dotenv').config();
 const runLLMScript = require('./runLLMScript');
 const { PRD_SECTIONS, QUESTION_TEMPLATES } = require('./prdConfig');
@@ -212,6 +213,9 @@ console.log('Resolved prdPath:', prdPath);
 // Sessions directory
 const sessionsDir = path.join(__dirname, '..', 'sessions');
 if (!fs.existsSync(sessionsDir)) fs.mkdirSync(sessionsDir, { recursive: true });
+// Code jobs directory
+const codeJobsDir = path.join(__dirname, '..', 'Documents', 'code_jobs');
+if (!fs.existsSync(codeJobsDir)) fs.mkdirSync(codeJobsDir, { recursive: true });
 
 // Utility to load all sessions
 function listSessions() {
@@ -971,6 +975,252 @@ app.post('/api/sessions/:id/prd/merge', (req, res) => {
     fs.writeFileSync(sessionFile, JSON.stringify(session, null, 2));
   }
   res.json({ ok: true });
+});
+
+// --- Code Jobs (MVP scaffolding) ---
+function isTextLike(file) {
+  const ext = (file.split('.').pop() || '').toLowerCase();
+  const allow = new Set(['js','jsx','ts','tsx','json','md','py','rb','go','java','cs','c','h','hpp','cpp','yaml','yml','toml','ini','sh','bash','zsh','cfg','txt','rs','kt','swift','php','html','css','sass','scss']);
+  return allow.has(ext);
+}
+function shouldIgnore(rel) {
+  const parts = rel.split(path.sep);
+  if (parts.includes('node_modules')) return true;
+  if (parts.includes('.git')) return true;
+  if (parts.includes('dist') || parts.includes('build')) return true;
+  return false;
+}
+function walkFiles(root) {
+  const out = [];
+  const stack = ['.'];
+  while (stack.length) {
+    const rel = stack.pop();
+    const abs = path.join(root, rel);
+    let st;
+    try { st = fs.statSync(abs); } catch { continue; }
+    if (st.isDirectory()) {
+      if (shouldIgnore(rel)) continue;
+      const items = fs.readdirSync(abs);
+      for (const it of items) stack.push(path.join(rel, it));
+    } else {
+      if (shouldIgnore(rel)) continue;
+      out.push({ rel, abs, size: st.size });
+    }
+  }
+  return out;
+}
+
+// Prepare: scan a folder and create a job manifest
+app.post('/api/code/prepare', (req, res) => {
+  try {
+    const { sessionId, codeRoot } = req.body || {};
+    if (!sessionId || !codeRoot) return res.status(400).json({ error: 'Missing sessionId or codeRoot' });
+    // Expand leading '~' to the user's home dir
+    const raw = String(codeRoot);
+    const expanded = raw.replace(/^~(?=$|\/)/, os.homedir());
+    const root = path.resolve(expanded);
+    if (!fs.existsSync(root)) return res.status(400).json({ error: 'codeRoot does not exist' });
+    try { if (!fs.statSync(root).isDirectory()) return res.status(400).json({ error: 'codeRoot is not a directory' }); } catch {}
+    // Optional allowed roots guard
+    const allowed = (process.env.CODE_ALLOWED_ROOTS || '').split(':').filter(Boolean);
+    if (allowed.length && !allowed.some(a => root.startsWith(path.resolve(a)))) {
+      return res.status(400).json({ error: 'codeRoot not in allowed roots' });
+    }
+    const all = walkFiles(root);
+    // Basic capping: only text-like files, each <= 256KB, at most 500 files or 5MB total
+    const maxFile = 256 * 1024;
+    const maxBytes = 5 * 1024 * 1024;
+    const files = [];
+    let total = 0;
+    for (const f of all) {
+      if (!isTextLike(f.rel)) continue;
+      if (f.size > maxFile) continue;
+      if (files.length >= 500) break;
+      if (total + f.size > maxBytes) break;
+      files.push({ path: f.rel, size: f.size });
+      total += f.size;
+    }
+    const jobId = Date.now().toString();
+    const jobDir = path.join(codeJobsDir, jobId);
+    fs.mkdirSync(jobDir, { recursive: true });
+    const meta = { jobId, sessionId, codeRoot: root, files, bytes: total, createdAt: new Date().toISOString() };
+    fs.writeFileSync(path.join(jobDir, 'job.json'), JSON.stringify(meta, null, 2));
+    res.json({ jobId, fileCount: files.length, bytes: total, ignored: all.length - files.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'prepare failed' });
+  }
+});
+
+// Propose: mocked proposal that prepends a PRD note at top of up to 3 files
+app.post('/api/code/propose', async (req, res) => {
+  try {
+    const { sessionId, jobId, extraPrompt } = req.body || {};
+    if (!sessionId || !jobId) return res.status(400).json({ error: 'Missing sessionId or jobId' });
+    const jobDir = path.join(codeJobsDir, jobId);
+    const metaPath = path.join(jobDir, 'job.json');
+    if (!fs.existsSync(metaPath)) return res.status(404).json({ error: 'Job not found' });
+    const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+    const session = getSession(sessionId);
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    const prdAbsPath = path.join(__dirname, '..', session.prdPath);
+    let prdText = '';
+    try { prdText = fs.readFileSync(prdAbsPath, 'utf-8'); } catch {}
+
+    // Load file contents according to manifest
+    const filesPayload = [];
+    for (const f of meta.files) {
+      const abs = path.join(meta.codeRoot, f.path);
+      let content = '';
+      try { content = fs.readFileSync(abs, 'utf-8'); } catch {}
+      filesPayload.push({ path: f.path, content });
+    }
+
+    const scriptPath = path.join(__dirname, '..', 'llm', 'code_transform.py');
+    const codeModel = process.env.OPENAI_CODE_MODEL || ACTIVE_OPENAI_MODEL;
+    // Simple language hint from extensions
+    const counts = new Map();
+    for (const f of filesPayload) {
+      const m = /\.([a-z0-9]+)$/i.exec(f.path || '');
+      if (m) counts.set(m[1].toLowerCase(), (counts.get(m[1].toLowerCase())||0)+1);
+    }
+    let langHint = '';
+    if (counts.size) {
+      const top = [...counts.entries()].sort((a,b)=>b[1]-a[1])[0][0];
+      const map = { js:'JavaScript/Jest', jsx:'JavaScript/Jest', ts:'TypeScript/Jest', tsx:'TypeScript/Jest', py:'Python/pytest', java:'Java/JUnit', kt:'Kotlin/JUnit', cs:'C#/xUnit', rb:'Ruby/RSpec', go:'Go/testing', rs:'Rust/cargo test' };
+      langHint = map[top] || top;
+    }
+    const llmInput = {
+      prd: prdText,
+      extraPrompt: String(extraPrompt || ''),
+      files: filesPayload,
+      llm: codeModel,
+      limits: { maxChanges: 50, maxTokens: 4000 },
+      langHint
+    };
+    // Lightweight diagnostics
+    try {
+      console.log('[CODE PROPOSE] model=%s files=%d prdBytes=%d extraBytes=%d', codeModel, filesPayload.length, prdText.length, String(extraPrompt||'').length);
+    } catch {}
+    const result = await runLLMScript(scriptPath, llmInput);
+    if (result && result.error) {
+      console.error('[CODE PROPOSE] LLM error:', result.error);
+      if (result.traceback) console.error(result.traceback);
+      return res.status(502).json({ error: result.error });
+    }
+    const changes = Array.isArray(result.changes) ? result.changes : [];
+
+    // Stage changes
+    const staging = path.join(jobDir, 'staging');
+    fs.mkdirSync(staging, { recursive: true });
+    for (const ch of changes) {
+      const rel = String(ch.path || '').replace(/^\//, '');
+      const dst = path.join(staging, rel);
+      const action = String(ch.action || '').toLowerCase();
+      if (action === 'add' || action === 'modify') {
+        const content = String(ch.new_content || '');
+        fs.mkdirSync(path.dirname(dst), { recursive: true });
+        fs.writeFileSync(dst, content, 'utf-8');
+      } else if (action === 'delete') {
+        // mark deletion by creating a tombstone file alongside
+        const mark = dst + '.delete.TOMBSTONE';
+        fs.mkdirSync(path.dirname(mark), { recursive: true });
+        fs.writeFileSync(mark, 'delete', 'utf-8');
+      }
+    }
+    fs.writeFileSync(path.join(jobDir, 'proposed.json'), JSON.stringify({ changes, notes: String(result.notes || '') }, null, 2));
+    res.json({ jobId, changes });
+  } catch (e) {
+    console.error('[CODE PROPOSE] Failed:', e?.message || e);
+    if (e && e.stderr) console.error('[CODE PROPOSE] stderr:', e.stderr);
+    if (e && e.stdout) console.error('[CODE PROPOSE] stdout:', e.stdout);
+    res.status(500).json({ error: e.message || 'propose failed' });
+  }
+});
+
+// Diff: return old/new text for each staged file
+app.get('/api/code/diff/:jobId', (req, res) => {
+  try {
+    const jobId = req.params.jobId;
+    const jobDir = path.join(codeJobsDir, jobId);
+    const meta = JSON.parse(fs.readFileSync(path.join(jobDir, 'job.json'), 'utf-8'));
+    const staging = path.join(jobDir, 'staging');
+    const files = [];
+    const stack = ['.'];
+    while (stack.length) {
+      const rel = stack.pop();
+      const abs = path.join(staging, rel);
+      if (!fs.existsSync(abs)) continue;
+      const st = fs.statSync(abs);
+      if (st.isDirectory()) {
+        for (const it of fs.readdirSync(abs)) stack.push(path.join(rel, it));
+      } else {
+        const newText = fs.readFileSync(abs, 'utf-8');
+        let oldText = '';
+        try { oldText = fs.readFileSync(path.join(meta.codeRoot, rel), 'utf-8'); } catch {}
+        files.push({ path: rel.replace(/^\./, ''), oldText, newText });
+      }
+    }
+    res.set('Cache-Control', 'no-store');
+    res.json({ files });
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'diff failed' });
+  }
+});
+
+// Accept: apply staged files into codeRoot
+app.post('/api/code/accept/:jobId', (req, res) => {
+  try {
+    const jobId = req.params.jobId;
+    const jobDir = path.join(codeJobsDir, jobId);
+    const meta = JSON.parse(fs.readFileSync(path.join(jobDir, 'job.json'), 'utf-8'));
+    const staging = path.join(jobDir, 'staging');
+    let proposed = {};
+    const proposedPath = path.join(jobDir, 'proposed.json');
+    if (fs.existsSync(proposedPath)) {
+      try { proposed = JSON.parse(fs.readFileSync(proposedPath, 'utf-8')); } catch {}
+    }
+    const stack = ['.'];
+    while (stack.length) {
+      const rel = stack.pop();
+      const abs = path.join(staging, rel);
+      if (!fs.existsSync(abs)) continue;
+      const st = fs.statSync(abs);
+      if (st.isDirectory()) {
+        for (const it of fs.readdirSync(abs)) stack.push(path.join(rel, it));
+      } else {
+        if (abs.endsWith('.delete.TOMBSTONE')) continue; // handled below
+        const src = abs;
+        const dst = path.join(meta.codeRoot, rel);
+        const dstDir = path.dirname(dst);
+        fs.mkdirSync(dstDir, { recursive: true });
+        fs.copyFileSync(src, dst);
+      }
+    }
+    // Apply deletions
+    const deletions = (proposed.changes || []).filter(ch => String(ch.action||'').toLowerCase() === 'delete');
+    for (const d of deletions) {
+      const rel = String(d.path || '').replace(/^\//,'');
+      const target = path.join(meta.codeRoot, rel);
+      try { if (fs.existsSync(target)) fs.unlinkSync(target); } catch {}
+    }
+    // cleanup
+    try { fs.rmSync(jobDir, { recursive: true, force: true }); } catch {}
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'accept failed' });
+  }
+});
+
+// Reject: discard job
+app.post('/api/code/reject/:jobId', (req, res) => {
+  try {
+    const jobId = req.params.jobId;
+    const jobDir = path.join(codeJobsDir, jobId);
+    try { fs.rmSync(jobDir, { recursive: true, force: true }); } catch {}
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'reject failed' });
+  }
 });
 
 // Add global error and process event handlers for debugging

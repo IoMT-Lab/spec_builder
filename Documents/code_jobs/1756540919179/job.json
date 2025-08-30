@@ -1,0 +1,1101 @@
+{
+  "jobId": "1756540919179",
+  "sessionId": "1756538004660",
+  "codeRoot": "/Users/evankrueger/Dev/spec_builder",
+  "files": [
+    {
+      "path": "shared/README.md",
+      "size": 58
+    },
+    {
+      "path": "sessions/1756538004660.json",
+      "size": 37623
+    },
+    {
+      "path": "scenarios/photo_detector_tests.txt",
+      "size": 2727
+    },
+    {
+      "path": "package.json",
+      "size": 128
+    },
+    {
+      "path": "package-lock.json",
+      "size": 28437
+    },
+    {
+      "path": "p3-main/readme.html",
+      "size": 90608
+    },
+    {
+      "path": "p3-main/cmake/stm32cubemx/CMakeLists.txt",
+      "size": 3953
+    },
+    {
+      "path": "p3-main/Src/utils/test_harness.c",
+      "size": 2140
+    },
+    {
+      "path": "p3-main/Src/utils/serial.c",
+      "size": 2047
+    },
+    {
+      "path": "p3-main/Src/testing/tests.c",
+      "size": 3206
+    },
+    {
+      "path": "p3-main/Src/system/system_stm32wb0x.c",
+      "size": 12321
+    },
+    {
+      "path": "p3-main/Src/system/sysmem.c",
+      "size": 2986
+    },
+    {
+      "path": "p3-main/Src/system/syscalls.c",
+      "size": 5109
+    },
+    {
+      "path": "p3-main/Src/system/stm32wb0x_it.c",
+      "size": 5070
+    },
+    {
+      "path": "p3-main/Src/system/stm32wb0x_hal_msp.c",
+      "size": 7943
+    },
+    {
+      "path": "p3-main/Src/main.c",
+      "size": 10478
+    },
+    {
+      "path": "p3-main/Src/app/as7341.c",
+      "size": 3375
+    },
+    {
+      "path": "p3-main/Src/app/app.c",
+      "size": 1931
+    },
+    {
+      "path": "p3-main/README.md",
+      "size": 5154
+    },
+    {
+      "path": "p3-main/Inc/utils/test_harness.h",
+      "size": 261
+    },
+    {
+      "path": "p3-main/Inc/utils/serial.h",
+      "size": 382
+    },
+    {
+      "path": "p3-main/Inc/system/stm32wb0x_nucleo_conf.h",
+      "size": 1493
+    },
+    {
+      "path": "p3-main/Inc/system/stm32wb0x_it.h",
+      "size": 1929
+    },
+    {
+      "path": "p3-main/Inc/system/stm32wb0x_hal_conf.h",
+      "size": 10473
+    },
+    {
+      "path": "p3-main/Inc/globals.h",
+      "size": 229
+    },
+    {
+      "path": "p3-main/Inc/app/as7341.h",
+      "size": 895
+    },
+    {
+      "path": "p3-main/Inc/app/app.h",
+      "size": 304
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_uart_ex.c",
+      "size": 39609
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_uart.c",
+      "size": 166374
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_rcc_ex.c",
+      "size": 16708
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_rcc.c",
+      "size": 28548
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_pwr_ex.c",
+      "size": 17023
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_pwr.c",
+      "size": 19224
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_i2c_ex.c",
+      "size": 7174
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_i2c.c",
+      "size": 245803
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_gpio.c",
+      "size": 21080
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_flash_ex.c",
+      "size": 16721
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_flash.c",
+      "size": 16078
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_dma.c",
+      "size": 26953
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_cortex.c",
+      "size": 13044
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal.c",
+      "size": 13606
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/LICENSE.txt",
+      "size": 377
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_utils.h",
+      "size": 8171
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_usart.h",
+      "size": 176174
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_system.h",
+      "size": 64181
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_rcc.h",
+      "size": 71613
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_pwr.h",
+      "size": 119318
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_lpuart.h",
+      "size": 96666
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_i2c.h",
+      "size": 83039
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_gpio.h",
+      "size": 35485
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_dmamux.h",
+      "size": 9894
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_dma.h",
+      "size": 74726
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_cortex.h",
+      "size": 21412
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_bus.h",
+      "size": 27358
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_uart_ex.h",
+      "size": 13498
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_uart.h",
+      "size": 93337
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_rcc_ex.h",
+      "size": 16861
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_rcc.h",
+      "size": 65616
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_pwr_ex.h",
+      "size": 31234
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_pwr.h",
+      "size": 40751
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_i2c_ex.h",
+      "size": 4831
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_i2c.h",
+      "size": 38962
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_gpio_ex.h",
+      "size": 10825
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_gpio.h",
+      "size": 16811
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_flash_ex.h",
+      "size": 2706
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_flash.h",
+      "size": 21846
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_dma.h",
+      "size": 28527
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_def.h",
+      "size": 7689
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_cortex.h",
+      "size": 15441
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal.h",
+      "size": 7958
+    },
+    {
+      "path": "p3-main/Drivers/STM32WB0x_HAL_Driver/Inc/Legacy/stm32_hal_legacy.h",
+      "size": 240941
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/LICENSE.txt",
+      "size": 11357
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/tz_context.h",
+      "size": 2687
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/pmu_armv8.h",
+      "size": 22786
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/pac_armv81.h",
+      "size": 6062
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/mpu_armv8.h",
+      "size": 11370
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/mpu_armv7.h",
+      "size": 11731
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/core_starmc1.h",
+      "size": 193055
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/core_sc300.h",
+      "size": 108524
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/core_sc000.h",
+      "size": 46562
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/core_cm7.h",
+      "size": 138948
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/core_cm4.h",
+      "size": 120975
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/core_cm35p.h",
+      "size": 189539
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/core_cm33.h",
+      "size": 189524
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/core_cm3.h",
+      "size": 109529
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/core_cm23.h",
+      "size": 121556
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/core_cm1.h",
+      "size": 42626
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/core_cm0plus.h",
+      "size": 49877
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/core_cm0.h",
+      "size": 41643
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/core_armv8mml.h",
+      "size": 183191
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/core_armv8mbl.h",
+      "size": 115004
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/cmsis_version.h",
+      "size": 1680
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/cmsis_iccarm.h",
+      "size": 29069
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/cmsis_gcc.h",
+      "size": 63374
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/cmsis_compiler.h",
+      "size": 9481
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/cmsis_armclang_ltm.h",
+      "size": 56021
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/cmsis_armclang.h",
+      "size": 48417
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/cmsis_armcc.h",
+      "size": 27999
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Include/cachel1_armv7.h",
+      "size": 13255
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Device/ST/STM32WB0X/Source/Templates/system_stm32wb0x.c",
+      "size": 11834
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Device/ST/STM32WB0X/LICENSE.txt",
+      "size": 371
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Device/ST/STM32WB0X/Include/system_stm32wb0x.h",
+      "size": 5688
+    },
+    {
+      "path": "p3-main/Drivers/CMSIS/Device/ST/STM32WB0X/Include/stm32wb0x.h",
+      "size": 6969
+    },
+    {
+      "path": "p3-main/Drivers/BSP/STM32WB0x-nucleo/stm32wb0x_nucleo_errno.h",
+      "size": 1461
+    },
+    {
+      "path": "p3-main/Drivers/BSP/STM32WB0x-nucleo/stm32wb0x_nucleo_conf_template.h",
+      "size": 1567
+    },
+    {
+      "path": "p3-main/Drivers/BSP/STM32WB0x-nucleo/stm32wb0x_nucleo.h",
+      "size": 9759
+    },
+    {
+      "path": "p3-main/Drivers/BSP/STM32WB0x-nucleo/stm32wb0x_nucleo.c",
+      "size": 18586
+    },
+    {
+      "path": "p3-main/Drivers/BSP/STM32WB0x-nucleo/_htmresc/mini-st_2020.css",
+      "size": 57898
+    },
+    {
+      "path": "p3-main/Drivers/BSP/STM32WB0x-nucleo/Release_Notes.html",
+      "size": 5041
+    },
+    {
+      "path": "p3-main/Drivers/BSP/STM32WB0x-nucleo/LICENSE.txt",
+      "size": 377
+    },
+    {
+      "path": "p3-main/CMakePresets.json",
+      "size": 906
+    },
+    {
+      "path": "p3-main/CMakeLists.txt",
+      "size": 1963
+    },
+    {
+      "path": "llm/tests/test_fact_extractor_unit.py",
+      "size": 2404
+    },
+    {
+      "path": "llm/test_fact_extractor.py",
+      "size": 1447
+    },
+    {
+      "path": "llm/prior scripts/ui_utils.py",
+      "size": 1293
+    },
+    {
+      "path": "llm/prior scripts/question_templates.py",
+      "size": 2174
+    },
+    {
+      "path": "llm/prior scripts/prd_structure.py",
+      "size": 1503
+    },
+    {
+      "path": "llm/prior scripts/prd_generator.py",
+      "size": 14494
+    },
+    {
+      "path": "llm/prior scripts/main.py",
+      "size": 6849
+    },
+    {
+      "path": "llm/prior scripts/llm_interface.py",
+      "size": 2644
+    },
+    {
+      "path": "llm/prior scripts/__init__.py",
+      "size": 54
+    },
+    {
+      "path": "llm/fact_extractor.py",
+      "size": 6198
+    },
+    {
+      "path": "llm/conversation_flow.py",
+      "size": 7555
+    },
+    {
+      "path": "llm/code_transform.py",
+      "size": 5140
+    },
+    {
+      "path": "llm/README.md",
+      "size": 31
+    },
+    {
+      "path": "frontend/vite.config.js",
+      "size": 575
+    },
+    {
+      "path": "frontend/src/main.jsx",
+      "size": 229
+    },
+    {
+      "path": "frontend/src/index.css",
+      "size": 1272
+    },
+    {
+      "path": "frontend/src/PrdDiffPanel.jsx",
+      "size": 17532
+    },
+    {
+      "path": "frontend/src/MarkdownPanel.jsx",
+      "size": 3001
+    },
+    {
+      "path": "frontend/src/DraftsmanPanel.jsx",
+      "size": 520
+    },
+    {
+      "path": "frontend/src/DraftsmanBackground.jsx",
+      "size": 973
+    },
+    {
+      "path": "frontend/src/CodePreview.jsx",
+      "size": 5207
+    },
+    {
+      "path": "frontend/src/App.jsx",
+      "size": 26562
+    },
+    {
+      "path": "frontend/src/App.css",
+      "size": 10889
+    },
+    {
+      "path": "frontend/package.json",
+      "size": 684
+    },
+    {
+      "path": "frontend/package-lock.json",
+      "size": 142832
+    },
+    {
+      "path": "frontend/index.html",
+      "size": 361
+    },
+    {
+      "path": "frontend/eslint.config.js",
+      "size": 844
+    },
+    {
+      "path": "frontend/README.md",
+      "size": 856
+    },
+    {
+      "path": "backend/runLLMScript.js",
+      "size": 1831
+    },
+    {
+      "path": "backend/prdSessionStore.js",
+      "size": 3638
+    },
+    {
+      "path": "backend/prdConfig.js",
+      "size": 2687
+    },
+    {
+      "path": "backend/package.json",
+      "size": 278
+    },
+    {
+      "path": "backend/package-lock.json",
+      "size": 78985
+    },
+    {
+      "path": "backend/index.js",
+      "size": 52033
+    },
+    {
+      "path": "backend/README.md",
+      "size": 1457
+    },
+    {
+      "path": "README.md",
+      "size": 1931
+    },
+    {
+      "path": "Documents/PRD_draft.md",
+      "size": 70
+    },
+    {
+      "path": "Documents/PRD_1756538004660.md",
+      "size": 5132
+    },
+    {
+      "path": "Documents/PRD_1756535402786_temp.md",
+      "size": 0
+    },
+    {
+      "path": "Documents/PRD_1756527262008_temp.md",
+      "size": 8029
+    },
+    {
+      "path": "Documents/PRD_1756517287551_temp.md",
+      "size": 0
+    },
+    {
+      "path": "Documents/PRD_1756516802778_temp.md",
+      "size": 0
+    },
+    {
+      "path": "Documents/PRD_1756515547850_temp.md",
+      "size": 0
+    },
+    {
+      "path": "Documents/PRD_1756515511163_temp.md",
+      "size": 0
+    },
+    {
+      "path": "Documents/PRD_1756515119346_temp.md",
+      "size": 0
+    },
+    {
+      "path": "Documents/PRD_1756514133877_temp.md",
+      "size": 0
+    },
+    {
+      "path": "Documents/PRD_1756512750212_temp.md",
+      "size": 0
+    },
+    {
+      "path": "Documents/PRD_1756512150093_temp.md",
+      "size": 3533
+    },
+    {
+      "path": "Documents/PRD_1756511372223_temp.md",
+      "size": 3618
+    },
+    {
+      "path": "Documents/PRD_1756511372155_temp.md",
+      "size": 3189
+    },
+    {
+      "path": "Documents/PRD_1756510361294_temp.md",
+      "size": 3013
+    },
+    {
+      "path": "Documents/PRD_1756508465529_temp.md",
+      "size": 703
+    },
+    {
+      "path": "Documents/PRD_1756503104569_temp.md",
+      "size": 1482
+    },
+    {
+      "path": "Documents/PRD_1756503104492_temp.md",
+      "size": 2256
+    },
+    {
+      "path": "Documents/PRD_1756499370044_temp.md",
+      "size": 2446
+    },
+    {
+      "path": "Documents/PRD_1756491901867_temp.md",
+      "size": 1966
+    },
+    {
+      "path": "Documents/PRD_1756491901765_temp.md",
+      "size": 1603
+    },
+    {
+      "path": "Documents/PRD_1756489582442_temp.md",
+      "size": 2447
+    },
+    {
+      "path": "Documents/PRD_1756486147156_temp.md",
+      "size": 1846
+    },
+    {
+      "path": "Documents/PRD_1756486147066_temp.md",
+      "size": 2518
+    },
+    {
+      "path": "Documents/PRD_1756486104594_temp.md",
+      "size": 1385
+    },
+    {
+      "path": "Documents/PRD_1756486104494_temp.md",
+      "size": 1684
+    },
+    {
+      "path": "Documents/PRD_1756486090461_temp.md",
+      "size": 1698
+    },
+    {
+      "path": "Documents/PRD_1756486090377_temp.md",
+      "size": 2928
+    },
+    {
+      "path": "Documents/PRD_1756486079537_temp.md",
+      "size": 1966
+    },
+    {
+      "path": "Documents/PRD_1756486079513_temp.md",
+      "size": 1664
+    },
+    {
+      "path": "Documents/PRD_1756486074767_temp.md",
+      "size": 2581
+    },
+    {
+      "path": "Documents/PRD_1756486074633_temp.md",
+      "size": 1808
+    },
+    {
+      "path": "Documents/PRD_1756486074189_temp.md",
+      "size": 2858
+    },
+    {
+      "path": "Documents/PRD_1756486074095_temp.md",
+      "size": 2605
+    },
+    {
+      "path": "Documents/PRD_1756486073426_temp.md",
+      "size": 2250
+    },
+    {
+      "path": "Documents/PRD_1756486073346_temp.md",
+      "size": 2450
+    },
+    {
+      "path": "Documents/PRD_1756438535896_temp.md",
+      "size": 2481
+    },
+    {
+      "path": "Documents/PRD_1750366281126_temp.md",
+      "size": 2870
+    },
+    {
+      "path": "Documents/PRD_1749856598789_temp.md",
+      "size": 2716
+    },
+    {
+      "path": "Documents/PRD_1749856108998_temp.md",
+      "size": 1221
+    },
+    {
+      "path": "Documents/CONVO_1756538004660.md",
+      "size": 12011
+    },
+    {
+      "path": "Documents/CONVO_1756536290989.md",
+      "size": 2475
+    },
+    {
+      "path": "Documents/CONVO_1756535988524.md",
+      "size": 1453
+    },
+    {
+      "path": "Documents/CONVO_1756535402786.md",
+      "size": 2260
+    },
+    {
+      "path": "Documents/CONVO_1756534964273.md",
+      "size": 989
+    },
+    {
+      "path": "Documents/CONVO_1756529433522.md",
+      "size": 989
+    },
+    {
+      "path": "Documents/CONVO_1756529105449.md",
+      "size": 989
+    },
+    {
+      "path": "Documents/CONVO_1756528482119.md",
+      "size": 988
+    },
+    {
+      "path": "Documents/CONVO_1756527262008.md",
+      "size": 2399
+    },
+    {
+      "path": "Documents/CONVO_1756526737218.md",
+      "size": 4529
+    },
+    {
+      "path": "Documents/CONVO_1756520920494.md",
+      "size": 2330
+    },
+    {
+      "path": "Documents/CONVO_1756520702153.md",
+      "size": 1976
+    },
+    {
+      "path": "Documents/CONVO_1756520176703.md",
+      "size": 32
+    },
+    {
+      "path": "Documents/CONVO_1756519992781.md",
+      "size": 397
+    },
+    {
+      "path": "Documents/CONVO_1756519218963.md",
+      "size": 434
+    },
+    {
+      "path": "Documents/CONVO_1756519046818.md",
+      "size": 516
+    },
+    {
+      "path": "Documents/CONVO_1756517287551.md",
+      "size": 404
+    },
+    {
+      "path": "Documents/CONVO_1756516802778.md",
+      "size": 2312
+    },
+    {
+      "path": "Documents/CONVO_1756516077222.md",
+      "size": 52
+    },
+    {
+      "path": "Documents/CONVO_1756516077130.md",
+      "size": 52
+    },
+    {
+      "path": "Documents/CONVO_1756515979467.md",
+      "size": 52
+    },
+    {
+      "path": "Documents/CONVO_1756515979394.md",
+      "size": 52
+    },
+    {
+      "path": "Documents/CONVO_1756515973459.md",
+      "size": 52
+    },
+    {
+      "path": "Documents/CONVO_1756515973393.md",
+      "size": 52
+    },
+    {
+      "path": "Documents/CONVO_1756515547850.md",
+      "size": 1140
+    },
+    {
+      "path": "Documents/CONVO_1756515547803.md",
+      "size": 52
+    },
+    {
+      "path": "Documents/CONVO_1756515511163.md",
+      "size": 265
+    },
+    {
+      "path": "Documents/CONVO_1756515511091.md",
+      "size": 52
+    },
+    {
+      "path": "Documents/CONVO_1756515507308.md",
+      "size": 52
+    },
+    {
+      "path": "Documents/CONVO_1756515507250.md",
+      "size": 52
+    },
+    {
+      "path": "Documents/CONVO_1756515119346.md",
+      "size": 1260
+    },
+    {
+      "path": "Documents/CONVO_1756515119258.md",
+      "size": 52
+    },
+    {
+      "path": "Documents/CONVO_1756514133877.md",
+      "size": 986
+    },
+    {
+      "path": "Documents/CONVO_1756514133805.md",
+      "size": 52
+    },
+    {
+      "path": "Documents/CONVO_1756512750212.md",
+      "size": 347
+    },
+    {
+      "path": "Documents/CONVO_1756512750142.md",
+      "size": 52
+    },
+    {
+      "path": "Documents/CONVO_1756512150163.md",
+      "size": 1069
+    },
+    {
+      "path": "Documents/CONVO_1756512150093.md",
+      "size": 216
+    },
+    {
+      "path": "Documents/CONVO_1756511372223.md",
+      "size": 466
+    },
+    {
+      "path": "Documents/CONVO_1756511372155.md",
+      "size": 221
+    },
+    {
+      "path": "Documents/CONVO_1756510361380.md",
+      "size": 470
+    },
+    {
+      "path": "Documents/CONVO_1756510361294.md",
+      "size": 208
+    },
+    {
+      "path": "Documents/CONVO_1756508465600.md",
+      "size": 52
+    },
+    {
+      "path": "Documents/CONVO_1756508465529.md",
+      "size": 52
+    },
+    {
+      "path": "Documents/CONVO_1756503104569.md",
+      "size": 52
+    },
+    {
+      "path": "Documents/CONVO_1756503104492.md",
+      "size": 52
+    },
+    {
+      "path": "Documents/CONVO_1756499370151.md",
+      "size": 1009
+    },
+    {
+      "path": "Documents/CONVO_1756499370044.md",
+      "size": 289
+    },
+    {
+      "path": "Documents/CONVO_1756491901867.md",
+      "size": 319
+    },
+    {
+      "path": "Documents/CONVO_1756491901765.md",
+      "size": 336
+    },
+    {
+      "path": "Documents/CONVO_1756489582442.md",
+      "size": 191
+    },
+    {
+      "path": "Documents/CONVO_1756489582352.md",
+      "size": 270
+    },
+    {
+      "path": "Documents/CONVO_1756486147156.md",
+      "size": 211
+    },
+    {
+      "path": "Documents/CONVO_1756486147066.md",
+      "size": 212
+    },
+    {
+      "path": "Documents/CONVO_1756486104594.md",
+      "size": 311
+    },
+    {
+      "path": "Documents/CONVO_1756486104494.md",
+      "size": 351
+    },
+    {
+      "path": "Documents/CONVO_1756486090461.md",
+      "size": 418
+    },
+    {
+      "path": "Documents/CONVO_1756486090377.md",
+      "size": 324
+    },
+    {
+      "path": "Documents/CONVO_1756486079537.md",
+      "size": 317
+    },
+    {
+      "path": "Documents/CONVO_1756486079513.md",
+      "size": 312
+    },
+    {
+      "path": "Documents/CONVO_1756486074767.md",
+      "size": 436
+    },
+    {
+      "path": "Documents/CONVO_1756486074633.md",
+      "size": 280
+    },
+    {
+      "path": "Documents/CONVO_1756486074189.md",
+      "size": 308
+    },
+    {
+      "path": "Documents/CONVO_1756486074095.md",
+      "size": 264
+    },
+    {
+      "path": "Documents/CONVO_1756486073426.md",
+      "size": 286
+    },
+    {
+      "path": "Documents/CONVO_1756486073346.md",
+      "size": 367
+    },
+    {
+      "path": "Documents/CONVO_1756438535896.md",
+      "size": 293
+    },
+    {
+      "path": "Documents/CONVO_1750366281126.md",
+      "size": 1818
+    },
+    {
+      "path": "Documents/CONVO_1750086852458.md",
+      "size": 1311
+    },
+    {
+      "path": "Documents/CONVO_1750086621427.md",
+      "size": 1434
+    },
+    {
+      "path": "Documents/CONVO_1750085900189.md",
+      "size": 1104
+    },
+    {
+      "path": "Documents/CONVO_1749856713970.md",
+      "size": 1591
+    },
+    {
+      "path": "Documents/CONVO_1749856598789.md",
+      "size": 1454
+    },
+    {
+      "path": "Documents/CONVO_1749856108998.md",
+      "size": 6945
+    },
+    {
+      "path": "Documents/CONVO_1749851056665.md",
+      "size": 2448
+    },
+    {
+      "path": "Documents/CONVO_1749849626279.md",
+      "size": 2817
+    },
+    {
+      "path": "Documents/CONVO_1749849524092.md",
+      "size": 1792
+    },
+    {
+      "path": "Documents/CONVO_1749849510510.md",
+      "size": 178
+    },
+    {
+      "path": "Documents/CONVO_1749849452032.md",
+      "size": 142
+    },
+    {
+      "path": "Documents/CONVO_1749849441700.md",
+      "size": 142
+    },
+    {
+      "path": "Documents/CONVO_1749849352979.md",
+      "size": 142
+    },
+    {
+      "path": "Documents/CONVO_1749849206246.md",
+      "size": 142
+    },
+    {
+      "path": "Documents/CONVO_1749849113321.md",
+      "size": 142
+    },
+    {
+      "path": "Documents/CONVO_1749848942379.md",
+      "size": 142
+    },
+    {
+      "path": "Documents/CONVO_1749848810854.md",
+      "size": 142
+    }
+  ],
+  "bytes": 4985699,
+  "createdAt": "2025-08-30T08:01:59.179Z"
+}

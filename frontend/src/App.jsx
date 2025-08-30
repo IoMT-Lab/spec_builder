@@ -4,6 +4,7 @@ import MarkdownPanel from './MarkdownPanel.jsx';
 import DraftsmanBackground from './DraftsmanBackground.jsx';
 import DraftsmanPanel from './DraftsmanPanel.jsx';
 import PrdDiffPanel from './PrdDiffPanel.jsx';
+import CodePreview from './CodePreview.jsx';
 
 function App() {
   console.log('App component rendered');
@@ -513,7 +514,17 @@ function App() {
                 >
                   &times;
                 </button>
-                {/* Expanded panel content goes here */}
+                {expandedPanel === 'code' ? (
+                  <div style={{ padding: 12 }}>
+                    {currentSession && !String(currentSession.id || '').startsWith('tmp-') ? (
+                      <CodePreview sessionId={currentSession.id} onClose={() => setExpandedPanel(null)} />
+                    ) : (
+                      <div style={{ color: '#b31d28' }}>Create or select a session first.</div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ padding: 12 }}>Expanded panel content goes here</div>
+                )}
               </div>
             </div>
           )}

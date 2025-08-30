@@ -1,0 +1,437 @@
+{
+  "jobId": "1756541215459",
+  "sessionId": "1756538004660",
+  "codeRoot": "/Users/evankrueger/Downloads/p3-main",
+  "files": [
+    {
+      "path": "readme.html",
+      "size": 90608
+    },
+    {
+      "path": "cmake/stm32cubemx/CMakeLists.txt",
+      "size": 3953
+    },
+    {
+      "path": "Src/utils/test_harness.c",
+      "size": 2140
+    },
+    {
+      "path": "Src/utils/serial.c",
+      "size": 2047
+    },
+    {
+      "path": "Src/testing/tests.c",
+      "size": 126
+    },
+    {
+      "path": "Src/system/system_stm32wb0x.c",
+      "size": 12321
+    },
+    {
+      "path": "Src/system/sysmem.c",
+      "size": 2986
+    },
+    {
+      "path": "Src/system/syscalls.c",
+      "size": 5109
+    },
+    {
+      "path": "Src/system/stm32wb0x_it.c",
+      "size": 5070
+    },
+    {
+      "path": "Src/system/stm32wb0x_hal_msp.c",
+      "size": 7943
+    },
+    {
+      "path": "Src/main.c",
+      "size": 10478
+    },
+    {
+      "path": "Src/app/as7341.c",
+      "size": 3375
+    },
+    {
+      "path": "Src/app/app.c",
+      "size": 1931
+    },
+    {
+      "path": "README.md",
+      "size": 5154
+    },
+    {
+      "path": "Inc/utils/test_harness.h",
+      "size": 261
+    },
+    {
+      "path": "Inc/utils/serial.h",
+      "size": 382
+    },
+    {
+      "path": "Inc/system/stm32wb0x_nucleo_conf.h",
+      "size": 1493
+    },
+    {
+      "path": "Inc/system/stm32wb0x_it.h",
+      "size": 1929
+    },
+    {
+      "path": "Inc/system/stm32wb0x_hal_conf.h",
+      "size": 10473
+    },
+    {
+      "path": "Inc/globals.h",
+      "size": 229
+    },
+    {
+      "path": "Inc/app/as7341.h",
+      "size": 895
+    },
+    {
+      "path": "Inc/app/app.h",
+      "size": 304
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_uart_ex.c",
+      "size": 39609
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_uart.c",
+      "size": 166374
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_rcc_ex.c",
+      "size": 16708
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_rcc.c",
+      "size": 28548
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_pwr_ex.c",
+      "size": 17023
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_pwr.c",
+      "size": 19224
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_i2c_ex.c",
+      "size": 7174
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_i2c.c",
+      "size": 245803
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_gpio.c",
+      "size": 21080
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_flash_ex.c",
+      "size": 16721
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_flash.c",
+      "size": 16078
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_dma.c",
+      "size": 26953
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_cortex.c",
+      "size": 13044
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal.c",
+      "size": 13606
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/LICENSE.txt",
+      "size": 377
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_utils.h",
+      "size": 8171
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_usart.h",
+      "size": 176174
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_system.h",
+      "size": 64181
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_rcc.h",
+      "size": 71613
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_pwr.h",
+      "size": 119318
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_lpuart.h",
+      "size": 96666
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_i2c.h",
+      "size": 83039
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_gpio.h",
+      "size": 35485
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_dmamux.h",
+      "size": 9894
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_dma.h",
+      "size": 74726
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_cortex.h",
+      "size": 21412
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_bus.h",
+      "size": 27358
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_uart_ex.h",
+      "size": 13498
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_uart.h",
+      "size": 93337
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_rcc_ex.h",
+      "size": 16861
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_rcc.h",
+      "size": 65616
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_pwr_ex.h",
+      "size": 31234
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_pwr.h",
+      "size": 40751
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_i2c_ex.h",
+      "size": 4831
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_i2c.h",
+      "size": 38962
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_gpio_ex.h",
+      "size": 10825
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_gpio.h",
+      "size": 16811
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_flash_ex.h",
+      "size": 2706
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_flash.h",
+      "size": 21846
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_dma.h",
+      "size": 28527
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_def.h",
+      "size": 7689
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_cortex.h",
+      "size": 15441
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal.h",
+      "size": 7958
+    },
+    {
+      "path": "Drivers/STM32WB0x_HAL_Driver/Inc/Legacy/stm32_hal_legacy.h",
+      "size": 240941
+    },
+    {
+      "path": "Drivers/CMSIS/LICENSE.txt",
+      "size": 11357
+    },
+    {
+      "path": "Drivers/CMSIS/Include/tz_context.h",
+      "size": 2687
+    },
+    {
+      "path": "Drivers/CMSIS/Include/pmu_armv8.h",
+      "size": 22786
+    },
+    {
+      "path": "Drivers/CMSIS/Include/pac_armv81.h",
+      "size": 6062
+    },
+    {
+      "path": "Drivers/CMSIS/Include/mpu_armv8.h",
+      "size": 11370
+    },
+    {
+      "path": "Drivers/CMSIS/Include/mpu_armv7.h",
+      "size": 11731
+    },
+    {
+      "path": "Drivers/CMSIS/Include/core_starmc1.h",
+      "size": 193055
+    },
+    {
+      "path": "Drivers/CMSIS/Include/core_sc300.h",
+      "size": 108524
+    },
+    {
+      "path": "Drivers/CMSIS/Include/core_sc000.h",
+      "size": 46562
+    },
+    {
+      "path": "Drivers/CMSIS/Include/core_cm7.h",
+      "size": 138948
+    },
+    {
+      "path": "Drivers/CMSIS/Include/core_cm4.h",
+      "size": 120975
+    },
+    {
+      "path": "Drivers/CMSIS/Include/core_cm35p.h",
+      "size": 189539
+    },
+    {
+      "path": "Drivers/CMSIS/Include/core_cm33.h",
+      "size": 189524
+    },
+    {
+      "path": "Drivers/CMSIS/Include/core_cm3.h",
+      "size": 109529
+    },
+    {
+      "path": "Drivers/CMSIS/Include/core_cm23.h",
+      "size": 121556
+    },
+    {
+      "path": "Drivers/CMSIS/Include/core_cm1.h",
+      "size": 42626
+    },
+    {
+      "path": "Drivers/CMSIS/Include/core_cm0plus.h",
+      "size": 49877
+    },
+    {
+      "path": "Drivers/CMSIS/Include/core_cm0.h",
+      "size": 41643
+    },
+    {
+      "path": "Drivers/CMSIS/Include/core_armv8mml.h",
+      "size": 183191
+    },
+    {
+      "path": "Drivers/CMSIS/Include/core_armv8mbl.h",
+      "size": 115004
+    },
+    {
+      "path": "Drivers/CMSIS/Include/cmsis_version.h",
+      "size": 1680
+    },
+    {
+      "path": "Drivers/CMSIS/Include/cmsis_iccarm.h",
+      "size": 29069
+    },
+    {
+      "path": "Drivers/CMSIS/Include/cmsis_gcc.h",
+      "size": 63374
+    },
+    {
+      "path": "Drivers/CMSIS/Include/cmsis_compiler.h",
+      "size": 9481
+    },
+    {
+      "path": "Drivers/CMSIS/Include/cmsis_armclang_ltm.h",
+      "size": 56021
+    },
+    {
+      "path": "Drivers/CMSIS/Include/cmsis_armclang.h",
+      "size": 48417
+    },
+    {
+      "path": "Drivers/CMSIS/Include/cmsis_armcc.h",
+      "size": 27999
+    },
+    {
+      "path": "Drivers/CMSIS/Include/cachel1_armv7.h",
+      "size": 13255
+    },
+    {
+      "path": "Drivers/CMSIS/Device/ST/STM32WB0X/Source/Templates/system_stm32wb0x.c",
+      "size": 11834
+    },
+    {
+      "path": "Drivers/CMSIS/Device/ST/STM32WB0X/LICENSE.txt",
+      "size": 371
+    },
+    {
+      "path": "Drivers/CMSIS/Device/ST/STM32WB0X/Include/system_stm32wb0x.h",
+      "size": 5688
+    },
+    {
+      "path": "Drivers/CMSIS/Device/ST/STM32WB0X/Include/stm32wb0x.h",
+      "size": 6969
+    },
+    {
+      "path": "Drivers/BSP/STM32WB0x-nucleo/stm32wb0x_nucleo_errno.h",
+      "size": 1461
+    },
+    {
+      "path": "Drivers/BSP/STM32WB0x-nucleo/stm32wb0x_nucleo_conf_template.h",
+      "size": 1567
+    },
+    {
+      "path": "Drivers/BSP/STM32WB0x-nucleo/stm32wb0x_nucleo.h",
+      "size": 9759
+    },
+    {
+      "path": "Drivers/BSP/STM32WB0x-nucleo/stm32wb0x_nucleo.c",
+      "size": 18586
+    },
+    {
+      "path": "Drivers/BSP/STM32WB0x-nucleo/_htmresc/mini-st_2020.css",
+      "size": 57898
+    },
+    {
+      "path": "Drivers/BSP/STM32WB0x-nucleo/Release_Notes.html",
+      "size": 5041
+    },
+    {
+      "path": "Drivers/BSP/STM32WB0x-nucleo/LICENSE.txt",
+      "size": 377
+    },
+    {
+      "path": "CMakePresets.json",
+      "size": 906
+    },
+    {
+      "path": "CMakeLists.txt",
+      "size": 1963
+    }
+  ],
+  "bytes": 4351662,
+  "createdAt": "2025-08-30T08:06:55.459Z"
+}
