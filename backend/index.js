@@ -404,8 +404,45 @@ app.post('/api/llm', async (req, res) => {
       const s = (typeof f.exact_span === 'string' && f.exact_span.trim()) ? f.exact_span.trim() : (typeof f.text === 'string' ? f.text.trim() : '');
       if (s) factStrings.push(s);
     }
+    // Build a resilient list of facts to attach for UI highlighting.
+    // Start with structured facts from the extractor, then fall back to planner facts
+    // and any strings we derived above. This ensures the UI can highlight even when
+    // the extractor returns empty or paraphrased spans.
+    const highlightFacts = [];
+    const seen = new Set();
+    const pushFact = (t) => {
+      const key = String(t || '').trim().toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      highlightFacts.push({ text: t, exact_span: t });
+    };
+    // 1) Keep original structured facts first (preserve any attributes if present)
+    for (const f of extractedFacts) {
+      if (!f) continue;
+      const base = (typeof f.exact_span === 'string' && f.exact_span.trim()) ? f.exact_span.trim() : (typeof f.text === 'string' ? f.text.trim() : '');
+      if (base) {
+        const key = base.toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          // keep the extractor's object as-is for richer UI later
+          highlightFacts.push(f);
+        }
+      }
+    }
+    // 2) Planner-provided fact strings
+    if (Array.isArray(planner.facts)) {
+      for (const s of planner.facts) pushFact(s);
+    }
+    // 3) Any additional derived strings (from exact spans)
+    for (const s of factStrings) pushFact(s);
     // Previous count for adaptive threshold
     const prevCount = getNotes(session, target.sectionIndex, target.fieldIndex).length;
+    // Heuristic fallback: if we have no extracted/planner facts on the first turn for this field,
+    // seed with a concise snippet of the user's input so the summary gate can fire.
+    if ((!Array.isArray(planner.facts) || planner.facts.length === 0) && factStrings.length === 0 && prevCount === 0) {
+      const seed = String(userInput || '').trim().replace(/\s+/g, ' ').slice(0, 140);
+      if (seed) factStrings.push(seed);
+    }
     addFactsToNotes(session, target.sectionIndex, target.fieldIndex, planner.facts || []);
     addFactsToNotes(session, target.sectionIndex, target.fieldIndex, factStrings);
     const factsNow = getNotes(session, target.sectionIndex, target.fieldIndex);
@@ -442,7 +479,7 @@ app.post('/api/llm', async (req, res) => {
       let idx = session.conversation.length - 1;
       while (idx >= 0 && session.conversation[idx].role !== 'user') idx--;
       if (idx >= 0) {
-        session.conversation[idx].facts = extractedFacts;
+        session.conversation[idx].facts = highlightFacts;
       }
     } catch {}
     session.conversation.push({ role: 'assistant', content: assistantContent });

@@ -1,4 +1,5 @@
 const { spawn } = require('child_process');
+const DEBUG = Boolean(process.env.FACTS_DEBUG || process.env.LLM_DEBUG);
 
 // Run a Python script for LLM conversation logic
 // scriptPath: path to the Python script (e.g., '../llm/conversation_flow.py')
@@ -24,6 +25,10 @@ function runLLMScript(scriptPath, inputObj) {
           stdout: output,
           stderr: error
         });
+      }
+      // Success path: optionally surface stderr for debugging
+      if (DEBUG && error) {
+        console.error('Python stderr (debug):', error);
       }
       try {
         resolve(JSON.parse(output));

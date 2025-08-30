@@ -14,6 +14,12 @@ except Exception as import_err:
     print(json.dumps({'error': f'Import error: {import_err}', 'traceback': traceback.format_exc()}))
     sys.exit(1)
 
+# Use the shared fact extractor so tests exercise the real code path
+try:
+    from fact_extractor import extract_facts  # type: ignore
+except Exception:
+    extract_facts = None  # type: ignore
+
 def main():
     try:
         data = json.loads(sys.stdin.read())
@@ -43,46 +49,24 @@ def main():
         reply = get_llm_response_from_context(messages, llm, temperature=reply_temp)
 
         # --- Fact extraction step (strict JSON) ---
-        # Ask the model to extract atomic facts from the latest user input and nearby context.
-        extract_system = {
-            "role": "system",
-            "content": (
-                "You extract atomic, verifiable facts from the user's latest input relevant to a PRD. "
-                "Return STRICT JSON with a single key 'facts' whose value is an array of objects with keys: "
-                "text (short paraphrase), exact_span (verbatim substring), sectionHint (string), fieldHint (string), "
-                "attributes (object with optional keys type, value, unit, comparator), confidence (0..1). "
-                "Output only JSON."
-            )
-        }
-        extract_user = {
-            "role": "user",
-            "content": (
-                f"Latest user input: {prompt}\n" +
-                f"Cursor: {json.dumps(structure.get('cursor', {}), ensure_ascii=False)} NextFocus: {json.dumps(structure.get('nextFocus', {}), ensure_ascii=False)}"
-            )
-        }
-        facts_raw = get_llm_response_from_context(
-            [extract_system, extract_user],
-            llm,
-            temperature=0.1,
-            response_format={"type": "json_object"},
-            max_tokens=400,
-        )
+        # Use shared extractor (mirrors production prompt/repair) for a single source of truth
         facts_json = {"facts": []}
         try:
-            parsed = json.loads(facts_raw)
-            if isinstance(parsed, dict) and isinstance(parsed.get('facts', []), list):
-                facts_json = parsed
-        except Exception:
-            # attempt a repair by asking to fix into valid JSON
-            repair_system = {"role": "system", "content": "Return ONLY valid JSON for the previous request. No commentary."}
-            facts_repair = get_llm_response_from_context([repair_system, {"role": "user", "content": facts_raw}], llm, temperature=0.0)
-            try:
-                parsed2 = json.loads(facts_repair)
-                if isinstance(parsed2, dict) and isinstance(parsed2.get('facts', []), list):
-                    facts_json = parsed2
-            except Exception:
+            if extract_facts is not None:
+                facts = extract_facts(prompt=prompt, structure=structure, llm=llm, temperature=0.1, max_tokens=400)
+                if isinstance(facts, list):
+                    facts_json = {"facts": facts}
+            else:
                 facts_json = {"facts": []}
+        except Exception:
+            facts_json = {"facts": []}
+        # Optional debug: print facts count without contaminating stdout JSON
+        try:
+            if os.getenv("FACTS_DEBUG") or os.getenv("LLM_DEBUG"):
+                count = len(facts_json.get('facts', [])) if isinstance(facts_json.get('facts'), list) else 0
+                print(f"[FACTS_DEBUG] facts_count: {count}", file=sys.stderr)
+        except Exception:
+            pass
 
         # --- Planner step (decide action + extract facts + optional summary) ---
         plan_system = {
