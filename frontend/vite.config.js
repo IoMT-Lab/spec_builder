@@ -7,6 +7,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api/llm': 'http://localhost:4000',
+      '/api/health': 'http://localhost:4000',
       '/api/markdown': 'http://localhost:4000',
       '/api/sessions': 'http://localhost:4000', // <-- Updated proxy for sessions
       '/api/prd': 'http://localhost:4000', // <-- Updated proxy for PRD endpoints

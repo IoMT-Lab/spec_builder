@@ -10,6 +10,9 @@ const { createSession, getSession, updateSession } = require('./prdSessionStore'
 
 const openaiApiKey = process.env.OPENAI_API_KEY;
 const geminiApiKey = process.env.GEMINI_API_KEY;
+const DEFAULT_OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5';
+let ACTIVE_OPENAI_MODEL = DEFAULT_OPENAI_MODEL;
+let OPENAI_PROBE = { ok: false, error: 'not probed yet', tried: [], chosen: null };
 
 const app = express();
 app.use(express.json());
@@ -220,12 +223,89 @@ function listSessions() {
     });
 }
 
+// --- Health utilities ---
+async function probeModel(modelId) {
+  const response = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${openaiApiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ model: modelId, input: 'ping' })
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error?.message || 'OpenAI API error');
+  return true;
+}
+
+async function chooseOpenAIModel() {
+  if (!openaiApiKey) {
+    OPENAI_PROBE = { ok: false, error: 'No OpenAI API key set', tried: [], chosen: null };
+    return OPENAI_PROBE;
+  }
+  const candidates = Array.from(new Set([
+    DEFAULT_OPENAI_MODEL,
+    'gpt-4o-mini',
+    'gpt-4o',
+  ])).filter(Boolean);
+  const tried = [];
+  for (const m of candidates) {
+    try {
+      await probeModel(m);
+      ACTIVE_OPENAI_MODEL = m;
+      OPENAI_PROBE = { ok: true, error: null, tried, chosen: m };
+      return OPENAI_PROBE;
+    } catch (e) {
+      tried.push({ model: m, error: e.message });
+    }
+  }
+  OPENAI_PROBE = { ok: false, error: tried[tried.length - 1]?.error || 'All probes failed', tried, chosen: null };
+  return OPENAI_PROBE;
+}
+
+async function probeOpenAIResponses() {
+  // Ensure we have chosen a working model if possible
+  if (!OPENAI_PROBE.ok) await chooseOpenAIModel();
+  return OPENAI_PROBE.ok
+    ? { ok: true, model: ACTIVE_OPENAI_MODEL }
+    : { ok: false, error: OPENAI_PROBE.error, tried: OPENAI_PROBE.tried };
+}
+
+// Health endpoint: checks env, OpenAI model, and Python script invocation
+app.get('/api/health', async (req, res) => {
+  const env = {
+    OPENAI_API_KEY: Boolean(openaiApiKey),
+    OPENAI_MODEL: DEFAULT_OPENAI_MODEL,
+  };
+  const openai = await probeOpenAIResponses();
+  // Probe Python by running the script with a no-op (shouldDraft: false)
+  let python = { ok: true };
+  try {
+    const scriptPath = path.join(__dirname, '..', 'llm', 'conversation_flow.py');
+    const result = await runLLMScript(scriptPath, {
+      prompt: 'ping',
+      conversation: [{ role: 'user', content: 'ping' }],
+      llm: openai.ok ? DEFAULT_OPENAI_MODEL : 'gpt-3.5-turbo',
+      prdDraft: '',
+      shouldDraft: false,
+      structure: { agenda: [], nextFocus: { sectionIndex: 0, fieldIndex: 0 }, cursor: { sectionIndex: 0, fieldIndex: 0 }, focusStack: [] },
+      temps: { reply: 0.0, draft: 0.0 }
+    });
+    python = { ok: true, reply: result.reply ? true : false };
+  } catch (e) {
+    python = { ok: false, error: e.message || e };
+  }
+  const ok = env.OPENAI_API_KEY && openai.ok && python.ok;
+  res.json({ ok, env, openai, python, activeModel: openai.model || null });
+});
+
 // LLM API endpoint (stateful, session-based)
 app.post('/api/llm', async (req, res) => {
   console.log('POST /api/llm called with body:', req.body);
   const sessionId = req.body.sessionId;
   let llm = req.body.llm;
-  if (llm === 'openai') llm = 'gpt-3.5-turbo';
+  // Map provider aliases to concrete model IDs
+  if (!llm || llm === 'openai' || llm === 'gpt5' || llm === 'gpt-5') llm = ACTIVE_OPENAI_MODEL;
   if (llm === 'gemini') llm = 'gemini-pro';
   const userInput = req.body.input || '';
   if (!sessionId) return res.status(400).json({ error: 'Missing sessionId' });
@@ -241,6 +321,14 @@ app.post('/api/llm', async (req, res) => {
   // Always call the LLM script, regardless of state
   try {
     const scriptPath = path.join(__dirname, '..', 'llm', 'conversation_flow.py');
+    // Hard gate: ensure model probe succeeded when using OpenAI
+    if (llm !== 'gemini-pro') {
+      const probe = await probeOpenAIResponses();
+      if (!probe.ok) {
+        return res.status(503).json({ error: 'LLM unavailable', details: probe });
+      }
+      llm = probe.model; // ensure we pass the active working model
+    }
     // If a pending temp PRD exists, avoid drafting and steer user to review
     const tempPathExisting = path.join(__dirname, '..', 'Documents', `PRD_${sessionId}_temp.md`);
     const hasPendingTemp = fs.existsSync(tempPathExisting);
@@ -287,7 +375,7 @@ app.post('/api/llm', async (req, res) => {
     const scriptResult = await runLLMScript(scriptPath, {
       prompt: userInput,
       conversation: replyConversation,
-      llm,
+      llm, // model id like 'gpt-5' or 'gemini-pro'
       // Anchor proposals to the accepted PRD on disk
       prdDraft: acceptedPrd || '',
       // Draft only after explicit confirmation, and never while a review is pending
@@ -406,7 +494,13 @@ app.post('/api/llm', async (req, res) => {
         console.warn('Failed to update conversation markdown for session', sessionId, e?.message || e);
       }
     }
-    return res.json({ reply: scriptResult.reply, prdDraft: scriptResult.prdDraft, session, hasPrdChanges });
+    // Include lightweight diagnostics for the UI
+    const diagnostics = {
+      model: llm,
+      factsCount: Array.isArray(extractedFacts) ? extractedFacts.length : 0,
+      awaitingConfirmation: Boolean(session.awaitingConfirmation),
+    };
+    return res.json({ reply: scriptResult.reply, prdDraft: scriptResult.prdDraft, session, hasPrdChanges, diagnostics });
   } catch (error) {
     return res.status(500).json({ error: 'LLM script error', details: error });
   }
@@ -414,22 +508,27 @@ app.post('/api/llm', async (req, res) => {
 
 // Endpoint to check API key and model access
 app.post('/api/llm/check', async (req, res) => {
-  const llm = req.body.llm;
+  const raw = req.body.llm;
+  const provider = (raw == null ? '' : String(raw)).toLowerCase();
   try {
-    if (llm === 'openai') {
+    // Treat any non-gemini value as OpenAI/Responses by default
+    if (provider !== 'gemini') {
       if (!openaiApiKey) return res.json({ ok: false, error: 'No OpenAI API key set' });
-      // Check model list
-      const response = await fetch('https://api.openai.com/v1/models', {
-        headers: { 'Authorization': `Bearer ${openaiApiKey}` },
+      // Responses API probe
+      const response = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${openaiApiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ model: DEFAULT_OPENAI_MODEL, input: 'ping' })
       });
       const data = await response.json();
       if (!response.ok) {
         return res.json({ ok: false, error: data.error?.message || 'OpenAI API error' });
       }
-      const hasModel = data.data && data.data.some(m => m.id === 'gpt-3.5-turbo');
-      if (!hasModel) return res.json({ ok: false, error: 'gpt-3.5-turbo model not available' });
-      return res.json({ ok: true });
-    } else if (llm === 'gemini') {
+      return res.json({ ok: true, model: DEFAULT_OPENAI_MODEL });
+    } else {
       if (!geminiApiKey) return res.json({ ok: false, error: 'No Gemini API key set' });
       // Check model access (Gemini API does not have a model list endpoint, so do a dry run)
       const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=' + geminiApiKey, {
@@ -441,9 +540,7 @@ app.post('/api/llm/check', async (req, res) => {
       if (!response.ok) {
         return res.json({ ok: false, error: data.error?.message || 'Gemini API error' });
       }
-      return res.json({ ok: true });
-    } else {
-      return res.json({ ok: false, error: 'Unsupported LLM provider' });
+      return res.json({ ok: true, model: 'gemini-pro' });
     }
   } catch (err) {
     console.error('API key/model check failed:', err.stack || err);

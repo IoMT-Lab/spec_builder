@@ -9,7 +9,7 @@ function App() {
   console.log('App component rendered');
 
   const [expandedPanel, setExpandedPanel] = useState(null);
-  const [llmProvider, setLlmProvider] = useState('openai');
+  const [llmProvider, setLlmProvider] = useState('gpt5');
   const [apiCheckResult, setApiCheckResult] = useState('');
   const [apiCheckLoading, setApiCheckLoading] = useState(false);
   // Session state
@@ -177,16 +177,16 @@ function App() {
     setApiCheckLoading(true);
     setApiCheckResult('');
     try {
-      const res = await fetch('/api/llm/check', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ llm: llmProvider }),
-      });
+      const res = await fetch('/api/health');
       const data = await res.json();
       if (data.ok) {
-        setApiCheckResult('API key is valid and model access confirmed.');
+        setApiCheckResult(`OK. Model: ${data.openai?.model || 'N/A'}`);
       } else {
-        setApiCheckResult(data.error ? `Error: ${data.error}` : 'Unknown error');
+        const parts = [];
+        if (!data.env?.OPENAI_API_KEY) parts.push('Missing OPENAI_API_KEY');
+        if (data.openai && data.openai.ok === false) parts.push(`OpenAI: ${data.openai.error}`);
+        if (data.python && data.python.ok === false) parts.push(`Python: ${data.python.error}`);
+        setApiCheckResult(`Error: ${parts.join(' | ') || 'Unknown error'}`);
       }
     } catch (err) {
       setApiCheckResult('Error contacting backend');
@@ -322,6 +322,26 @@ function App() {
     setPrdDiffRefreshKey(k => k + 1);
     setMarkdownRefreshKey(k => k + 1);
   };
+  // Run a health check on mount and surface issues prominently
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/health');
+        const data = await r.json();
+        if (!data.ok) {
+          const parts = [];
+          if (!data.env?.OPENAI_API_KEY) parts.push('Missing OPENAI_API_KEY');
+          if (data.openai && data.openai.ok === false) parts.push(`OpenAI: ${data.openai.error}`);
+          if (data.python && data.python.ok === false) parts.push(`Python: ${data.python.error}`);
+          setErrorMsg(parts.join(' | ') || 'Health check failed');
+        } else {
+          setApiCheckResult(`Connected. Model: ${data.activeModel || data.openai?.model || 'N/A'}`);
+        }
+      } catch (e) {
+        setErrorMsg('Health check failed: backend unreachable');
+      }
+    })();
+  }, []);
 
   // Sidebar UI
   const sidebar = (
@@ -398,7 +418,7 @@ function App() {
             value={llmProvider}
             onChange={(e) => setLlmProvider(e.target.value)}
           >
-            <option value="openai">OpenAI ChatGPT</option>
+            <option value="gpt5">OpenAI GPT‑5</option>
             <option value="gemini">Google Gemini</option>
           </select>
           <button
