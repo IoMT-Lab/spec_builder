@@ -54,19 +54,6 @@ export default function CodePreview({ sessionId, onClose }) {
     setProposing(false);
   };
 
-  const handleBrowse = async () => {
-    setError(''); setInfo('Opening folder picker…');
-    try {
-      const r = await fetch('/api/browse/dir');
-      const data = await r.json();
-      if (!r.ok || data.error) throw new Error(data.error || 'Browse failed');
-      if (data.ok && data.path) setCodeRoot(data.path);
-      setInfo('');
-    } catch (e) {
-      setError(e?.message || 'Browse failed');
-    }
-  };
-
   const handleAcceptAll = async () => {
     if (!job) return;
     setError(''); setInfo('Applying changes…');
@@ -97,14 +84,9 @@ export default function CodePreview({ sessionId, onClose }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8 }}>
-        <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 11, opacity: 0.7 }}>Code directory path</div>
-            <input value={codeRoot} onChange={e => setCodeRoot(e.target.value)} placeholder="/Users/you/Dev/myapp" />
-          </div>
-          <div>
-            <button onClick={handleBrowse} title="Browse for folder">Browse…</button>
-          </div>
+        <label>
+          Code directory path
+          <input value={codeRoot} onChange={e => setCodeRoot(e.target.value)} placeholder="/Users/you/Dev/myapp" />
         </label>
         <label>
           Extra prompt (optional)

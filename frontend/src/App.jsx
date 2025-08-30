@@ -451,7 +451,7 @@ function App() {
   const topMenu = (
     <div className="menu-bar">
       <span className="menu-icon" onClick={handleSidebarOpen} style={{cursor: 'pointer', fontSize: '1.7rem'}}>&#9776;</span>
-      <span className="menu-title">LLM Web App</span>
+  <span className="menu-title">Requirements Builder</span>
     </div>
   );
 
