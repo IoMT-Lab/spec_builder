@@ -457,9 +457,9 @@ body.is-dragging, body.is-dragging * { }
 
 /* --- Scroll caps for Replies and PRD document (Option A) --- */
 :root {
-  /* Tweak these to adjust how much of the viewport each panel can occupy */
-  --repliesMaxVh: 40vh; /* LLM Replies content max height */
-  --docMaxVh: 52vh;     /* PRD Document content max height */
+  /* Tweak this to adjust how much of the viewport each panel can occupy */
+  --docMaxVh: 52vh;     /* Unified panel content max height */
+  --repliesMaxVh: var(--docMaxVh);
 }
 
 /* Allow inner content to scroll inside flex containers */
@@ -486,4 +486,15 @@ body.is-dragging, body.is-dragging * { }
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   padding-right: 8px;
+  /* Ensure long lines wrap inside the PRD view */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Wrap code/pre blocks too so content doesn’t overflow the panel */
+.markdown-panel pre,
+.markdown-panel code {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
