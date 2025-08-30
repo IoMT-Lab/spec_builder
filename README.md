@@ -30,6 +30,8 @@ High-level architecture
 
 Intended user flow (step-by-step)
 
+<img width="1512" height="945" alt="Screenshot 2025-08-30 at 13 51 56" src="https://github.com/user-attachments/assets/3d14b8b8-ac83-4bfe-90da-32c9b50b4f77" />
+
 1. Start local servers (backend, then frontend).
 2. In the UI, create or select a session and start a conversation with the LLM. The LLM is guided by a system prompt and supporting structure messages so it helps the user produce a focused PRD.
 3. The user iteratively converses: the LLM asks clarifying questions, the user answers, and the PRD gets updated. The frontend persists drafts and shows coverage/weakness indicators for PRD sections.
@@ -42,6 +44,7 @@ Intended user flow (step-by-step)
 Work-in-progress and local-run notes
 
 - This project is a work in progress. It is intended to be run locally for experimentation and development.
+- Assurance Case generation and code analysis are still very much in development. 
 - The backend may call local Python scripts and (on macOS) may use small native helpers for convenience (for example, an optional file-browse helper). Those helpers may require local permission to run.
 - There are no production-grade security controls by default. Do not run this on a public server without adding proper authentication, path sanitization, and other hardening.
 
@@ -124,6 +127,8 @@ Design and implementation notes (important details)
 - Conversation: the backend keeps a session object per PRD session that tracks cursor/focus for PRD sections. The LLM is given structured system messages so it maintains a consistent approach to eliciting and validating PRD content.
 - PRD → Assurance Case: the LLM scripts include logic to derive structured assurance claims and minimal evidence pointers from the PRD text—these are used to guide code analysis prompts.
 - Code analysis: the backend scans a user-specified code directory and includes file contents in a payload sent to the LLM for lightweight analysis or patch proposals. Large repositories should be scanned with filters; the backend has heuristics to ignore binary files and large artifacts.
+
+<img width="1512" height="945" alt="Screenshot 2025-08-30 at 13 52 47" src="https://github.com/user-attachments/assets/06445b6a-7e98-4308-a125-8df80ebb922b" />
 
 Security & safety notes
 
