@@ -15,11 +15,12 @@ export default function MarkdownPanel({ sessionId, onSave, refreshKey }) {
       return;
     }
     setLoading(true);
-    fetch(`/api/sessions/${sessionId}`)
+    fetch(`/api/sessions/${sessionId}`, { cache: 'no-store' })
       .then(res => res.json())
       .then(session => {
         if (!session.prdPath) throw new Error('No PRD path');
-        return fetch(`/api/sessions/${sessionId}/prd`, { headers: { 'Accept': 'text/markdown' } });
+        const ts = Date.now();
+        return fetch(`/api/sessions/${sessionId}/prd?ts=${ts}`, { headers: { 'Accept': 'text/markdown' }, cache: 'no-store' });
       })
       .then(res => res.text())
       .then(text => {

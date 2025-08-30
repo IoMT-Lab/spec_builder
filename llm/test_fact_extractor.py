@@ -25,7 +25,7 @@ from fact_extractor import extract_facts  # type: ignore
 def main():
     ap = argparse.ArgumentParser(description="Test PRD fact extraction via OpenAI")
     ap.add_argument("--input", default="Users can sign in with Google; first response under 200ms.")
-    ap.add_argument("--model", default=os.getenv("OPENAI_MODEL", "gpt-4o-mini"))
+    ap.add_argument("--model", default=os.getenv("OPENAI_MODEL", "gpt-4o"))
     ap.add_argument("--sectionIndex", type=int, default=0)
     ap.add_argument("--fieldIndex", type=int, default=0)
     args = ap.parse_args()
@@ -40,4 +40,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

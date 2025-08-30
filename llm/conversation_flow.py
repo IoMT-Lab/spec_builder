@@ -53,7 +53,10 @@ def main():
         facts_json = {"facts": []}
         try:
             if extract_facts is not None:
-                facts = extract_facts(prompt=prompt, structure=structure, llm=llm, temperature=0.1, max_tokens=400)
+                # Allow a dedicated model for extraction only
+                facts_model = os.getenv("OPENAI_FACTS_MODEL") or os.getenv("FACTS_MODEL") or llm
+                # Use low temperature and a slightly larger token budget to avoid truncation
+                facts = extract_facts(prompt=prompt, structure=structure, llm=facts_model, temperature=0.0, max_tokens=800)
                 if isinstance(facts, list):
                     facts_json = {"facts": facts}
             else:
@@ -64,6 +67,8 @@ def main():
         try:
             if os.getenv("FACTS_DEBUG") or os.getenv("LLM_DEBUG"):
                 count = len(facts_json.get('facts', [])) if isinstance(facts_json.get('facts'), list) else 0
+                facts_model = os.getenv("OPENAI_FACTS_MODEL") or os.getenv("FACTS_MODEL") or llm
+                print(f"[FACTS_DEBUG] facts_model: {facts_model}", file=sys.stderr)
                 print(f"[FACTS_DEBUG] facts_count: {count}", file=sys.stderr)
         except Exception:
             pass

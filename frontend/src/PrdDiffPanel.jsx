@@ -53,7 +53,8 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave, onDiffStateChange }) => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    fetch(`/api/sessions/${sessionId}/prd/diff`)
+    const ts = Date.now();
+    fetch(`/api/sessions/${sessionId}/prd/diff?ts=${ts}`, { cache: 'no-store' })
       .then(r => {
         if (!r.ok) throw new Error('Failed to load diff');
         return r.json();

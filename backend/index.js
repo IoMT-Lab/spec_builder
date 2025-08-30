@@ -10,7 +10,7 @@ const { createSession, getSession, updateSession } = require('./prdSessionStore'
 
 const openaiApiKey = process.env.OPENAI_API_KEY;
 const geminiApiKey = process.env.GEMINI_API_KEY;
-const DEFAULT_OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5';
+const DEFAULT_OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o';
 let ACTIVE_OPENAI_MODEL = DEFAULT_OPENAI_MODEL;
 let OPENAI_PROBE = { ok: false, error: 'not probed yet', tried: [], chosen: null };
 
@@ -245,8 +245,10 @@ async function chooseOpenAIModel() {
   }
   const candidates = Array.from(new Set([
     DEFAULT_OPENAI_MODEL,
-    'gpt-4o-mini',
     'gpt-4o',
+    'gpt-4o-mini',
+    'gpt-5',
+    'gpt-5-nano',
   ])).filter(Boolean);
   const tried = [];
   for (const m of candidates) {
@@ -590,6 +592,7 @@ app.get('/api/markdown/prd', (req, res) => {
   console.log('Endpoint hit: /api/markdown/prd');
   console.log('Serving PRD markdown from:', prdPath);
   console.log('File exists:', fs.existsSync(prdPath));
+  res.set('Cache-Control', 'no-store');
   res.type('text/markdown');
   res.sendFile(prdPath, err => {
     if (err) {
@@ -705,6 +708,7 @@ app.get('/api/sessions/:id/prd', (req, res) => {
   if (!session) return res.status(404).send('Session not found');
   const prdAbsPath = path.join(__dirname, '..', session.prdPath);
   if (!fs.existsSync(prdAbsPath)) return res.status(404).send('PRD not found');
+  res.set('Cache-Control', 'no-store');
   res.type('text/markdown');
   res.sendFile(prdAbsPath, err => {
     if (err) {
@@ -895,6 +899,7 @@ app.get('/api/sessions/:id/prd/compare', (req, res) => {
       temp = fs.readFileSync(tempPath, 'utf-8');
     } catch {}
   }
+  res.set('Cache-Control', 'no-store');
   res.json({ main, temp });
 });
 
@@ -937,6 +942,7 @@ app.get('/api/sessions/:id/prd/diff', (req, res) => {
     // If no temp, show main PRD as both old and new (or new as blank for initial diff)
     newText = oldText; // or set to '' for blank diff
   }
+  res.set('Cache-Control', 'no-store');
   res.json({ oldText, newText, hasTemp });
 });
 

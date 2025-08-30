@@ -10,6 +10,7 @@ import json
 import os
 import sys
 from typing import Any, Dict, List, Optional
+import re
 
 # Make the "prior scripts" helpers importable. For unit tests (offline), we allow
 # this import to fail and expect tests to monkeypatch get_llm_response_from_context.
@@ -32,10 +33,9 @@ def _build_extractor_messages(prompt: str, structure: Optional[Dict[str, Any]] =
         "role": "system",
         "content": (
             "You extract atomic, verifiable facts from the user's latest input relevant to a PRD. "
-            "Return STRICT JSON with a single key 'facts' whose value is an array of objects with keys: "
-            "text (short paraphrase), exact_span (verbatim substring), sectionHint (string), fieldHint (string), "
-            "attributes (object with optional keys type, value, unit, comparator), confidence (0..1). "
-            "Output only JSON."
+            "Return STRICT JSON with a single key 'facts' whose value is an array (max 12 items) of objects with keys: "
+            "text (<=140 chars), exact_span, sectionHint, fieldHint, attributes (only if needed: {type,value,unit,comparator}), confidence (0..1). "
+            "Respond with a SINGLE JSON object only — no prose, no code fences, no comments."
         ),
     }
     extract_user = {
@@ -49,11 +49,31 @@ def _build_extractor_messages(prompt: str, structure: Optional[Dict[str, Any]] =
     return [extract_system, extract_user]
 
 
+_FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
+
+def _strip_fences(s: str) -> str:
+    """Remove ```json ... ``` fences if present; otherwise return original string."""
+    if not isinstance(s, str):
+        return s
+    m = _FENCE_RE.search(s)
+    return m.group(1).strip() if m else s
+
+def _extract_json_payload(s: str) -> str:
+    """Best-effort: strip fences, then slice from first '{' to last '}' if present."""
+    s2 = _strip_fences(s)
+    try:
+        start = s2.index('{')
+        end = s2.rindex('}') + 1
+        return s2[start:end]
+    except ValueError:
+        return s2
+
+
 def extract_facts(
     *,
     prompt: str,
     structure: Optional[Dict[str, Any]] = None,
-    llm: str = "gpt-4o-mini",
+    llm: str = "gpt-4o",
     temperature: float = 0.1,
     max_tokens: int = 400,
 ) -> List[Dict[str, Any]]:
@@ -84,7 +104,7 @@ def extract_facts(
     _dbg("facts_raw", (raw if isinstance(raw, str) else str(raw))[:4000])
     facts: List[Dict[str, Any]] = []
     try:
-        parsed = json.loads(raw)
+        parsed = json.loads(_extract_json_payload(raw))
         if isinstance(parsed, dict) and isinstance(parsed.get("facts", []), list):
             facts = parsed["facts"]
             _dbg("facts_parsed_count", str(len(facts)))
@@ -93,11 +113,20 @@ def extract_facts(
         pass
 
     # Repair attempt: ask the model to return valid JSON only
-    repair_system = {"role": "system", "content": "Return ONLY valid JSON for the previous request. No commentary."}
-    repaired = get_llm_response_from_context([repair_system, {"role": "user", "content": raw}], llm, temperature=0.0)
+    repair_system = {"role": "system", "content": (
+        "Return ONLY valid JSON for the extraction request as {\"facts\":[...]}. "
+        "No commentary, no code fences."
+    )}
+    repaired = get_llm_response_from_context(
+        messages + [repair_system],
+        llm,
+        temperature=0.0,
+        response_format={"type": "json_object"},
+        max_tokens=max_tokens,
+    )
     _dbg("facts_repaired_raw", (repaired if isinstance(repaired, str) else str(repaired))[:4000])
     try:
-        parsed2 = json.loads(repaired)
+        parsed2 = json.loads(_extract_json_payload(repaired))
         if isinstance(parsed2, dict) and isinstance(parsed2.get("facts", []), list):
             facts = parsed2["facts"]
             _dbg("facts_repaired_count", str(len(facts)))
