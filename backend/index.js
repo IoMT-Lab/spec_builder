@@ -21,6 +21,24 @@ app.use(express.json());
 // Log server start
 console.log('Backend server starting...');
 
+// --- Utility endpoint: open native folder picker on macOS and return POSIX path ---
+const { exec } = require('child_process');
+app.get('/api/browse/dir', (req, res) => {
+  // Only supported on macOS via AppleScript
+  if (process.platform !== 'darwin') {
+    return res.json({ ok: false, error: 'Browse dialog only supported on macOS' });
+  }
+  // Use AppleScript to show folder chooser and return POSIX path
+  const script = `osascript -e 'POSIX path of (choose folder with prompt "Select code directory")'`;
+  exec(script, { timeout: 120000 }, (err, stdout, stderr) => {
+    if (err) {
+      return res.json({ ok: false, error: String(stderr || err.message || err) });
+    }
+    const p = String(stdout || '').trim();
+    res.json({ ok: true, path: p });
+  });
+});
+
 // Consistent system prompt for chat replies (keeps assistant on-brief)
 const REPLY_SYSTEM_PROMPT = (
   'You are an expert product manager and technical writer helping a user shape a PRD via conversation. ' +
