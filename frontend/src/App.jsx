@@ -23,6 +23,8 @@ function App() {
   const [awaitingConfirm, setAwaitingConfirm] = useState(null); // { sectionIndex, fieldIndex, summaryText }
   const [creatingSession, setCreatingSession] = useState(false);
   const [infoMsg, setInfoMsg] = useState('');
+  const [autodriveRunning, setAutodriveRunning] = useState(false);
+  const [autodriveError, setAutodriveError] = useState('');
   const menuBarRef = useRef(null);
   const [menuBarRect, setMenuBarRect] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -219,6 +221,57 @@ function App() {
     } catch (err) {
       console.warn('Delete session failed:', err);
       // Non-fatal: UI already updated; if needed, user can refresh sessions list
+    }
+  };
+
+  const handleRunAutodrive = async () => {
+    if (autodriveRunning) return;
+    setAutodriveRunning(true);
+    setAutodriveError('');
+    try {
+      const res = await fetch('/api/sessions/autodrive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scenario: 'photo_detector_tests.txt' })
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `Scenario run failed (${res.status})`);
+      }
+      const data = await res.json();
+      if (data.session) {
+        const session = data.session;
+        setSessions(prev => {
+          const filtered = prev.filter(s => s.id !== session.id);
+          const next = [session, ...filtered];
+          saveOrder(next.map(s => s.id));
+          return applyOrder(next);
+        });
+        setCurrentSession(session);
+        setSidebarOpen(true);
+      } else if (data.sessionId) {
+        const sessionRes = await fetch(`/api/sessions/${data.sessionId}`);
+        if (sessionRes.ok) {
+          const session = await sessionRes.json();
+          setSessions(prev => {
+            const filtered = prev.filter(s => s.id !== session.id);
+            const next = [session, ...filtered];
+            saveOrder(next.map(s => s.id));
+            return applyOrder(next);
+          });
+          setCurrentSession(session);
+          setSidebarOpen(true);
+        } else {
+          await fetchSessions();
+        }
+      } else {
+        await fetchSessions();
+      }
+    } catch (err) {
+      console.error('Autodrive scenario failed:', err);
+      setAutodriveError(err.message || 'Failed to run scenario');
+    } finally {
+      setAutodriveRunning(false);
     }
   };
 
@@ -441,6 +494,17 @@ function App() {
           </button>
           {apiCheckResult && (
             <div className="api-check-result" style={{ marginTop: 8 }}>{apiCheckResult}</div>
+          )}
+          <button
+            className="check-api-btn"
+            onClick={handleRunAutodrive}
+            disabled={autodriveRunning}
+            style={{ marginLeft: 12, marginTop: 12 }}
+          >
+            {autodriveRunning ? 'Running scenario…' : 'Auto-generate PRD'}
+          </button>
+          {autodriveError && (
+            <div className="api-check-result" style={{ marginTop: 8, color: '#b31d28' }}>{autodriveError}</div>
           )}
         </div>
       </aside>

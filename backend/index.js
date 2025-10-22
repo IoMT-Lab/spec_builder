@@ -4,6 +4,7 @@ const fetch = fetchModule.default || fetchModule;
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { spawn } = require('child_process');
 require('dotenv').config();
 const runLLMScript = require('./runLLMScript');
 const { PRD_SECTIONS, QUESTION_TEMPLATES } = require('./prdConfig');
@@ -14,6 +15,65 @@ const geminiApiKey = process.env.GEMINI_API_KEY;
 const DEFAULT_OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o';
 let ACTIVE_OPENAI_MODEL = DEFAULT_OPENAI_MODEL;
 let OPENAI_PROBE = { ok: false, error: 'not probed yet', tried: [], chosen: null };
+
+const ROOT_DIR = path.join(__dirname, '..');
+const SCRIPTS_DIR = path.join(ROOT_DIR, 'scripts');
+const SCENARIOS_DIR = path.join(ROOT_DIR, 'scenarios');
+const CODE_MAX_FILES_PER_CHUNK = Math.max(parseInt(process.env.CODE_MAX_FILES_PER_CHUNK || '12', 10) || 12, 1);
+const CODE_MAX_CHARS_PER_CHUNK = Math.max(parseInt(process.env.CODE_MAX_CHARS_PER_CHUNK || '60000', 10) || 60000, 2000);
+const CODE_MAX_TOTAL_CHUNKS = Math.max(parseInt(process.env.CODE_MAX_TOTAL_CHUNKS || '12', 10) || 12, 1);
+const CODE_MAX_CHARS_PER_FILE = Math.max(parseInt(process.env.CODE_MAX_CHARS_PER_FILE || '40000', 10) || 40000, 2000);
+const STRICT_TEST_MODE = String(process.env.CODE_TEST_STRICT_MODE || '1').toLowerCase() !== '0';
+const STRICT_REALISM_FEEDBACK = (
+  'Add realistic hardware coverage: simulate driver/HAL error returns, invalid sensor data, and timing faults. ' +
+  'Assert the system reacts correctly, including recovery or safe shutdown paths.'
+);
+const STRICT_KEYWORDS = ['fail', 'error', 'invalid', 'timeout', 'fault', 'recover', 'retry', 'fallback'];
+const ASSERT_KEYWORDS = ['assert', 'expect', 'verify', 'check', 'ASSERT', 'EXPECT'];
+const HARDWARE_KEYWORDS = ['hal_', 'gpio_', 'i2c_', 'spi_', 'adc_', 'uart_', 'dma_', 'register', '0x'];
+const HARDWARE_REGEXES = [
+  /\bPD_[A-Za-z0-9_]+\b/,
+  /\bHAL_[A-Za-z0-9_]+\b/,
+  /\bI2C_[A-Za-z0-9_]+\b/,
+  /\bGPIO_[A-Za-z0-9_]+\b/,
+  /\bINTERRUPT\b/i,
+  /\bTHRESHOLD\b/i,
+  /\bLED\b/i,
+  /\bVALID\b/i,
+  /\bMEASURE\b/i,
+  /\bFAULT\b/i,
+  /\bTIMEOUT\b/i
+];
+const DEFAULT_TEST_TARGETS = [
+  {
+    exts: ['c', 'h'],
+    path: 'tests/generated_tests.c',
+    language: 'c',
+    framework: 'unity',
+    instructions: 'Use Unity-style C tests with setUp/tearDown and TEST_ASSERT macros.'
+  },
+  {
+    exts: ['cpp', 'cc', 'hpp', 'hh'],
+    path: 'tests/generated_tests.cpp',
+    language: 'cpp',
+    framework: 'gtest',
+    instructions: 'Use GoogleTest (TEST / TEST_F macros).'
+  },
+  {
+    exts: ['py'],
+    path: 'tests/test_generated.py',
+    language: 'python',
+    framework: 'pytest',
+    instructions: 'Use pytest style functions prefixed with test_ and simple asserts.'
+  },
+  {
+    exts: ['js', 'jsx', 'ts', 'tsx'],
+    path: '__tests__/generated.test.js',
+    language: 'javascript',
+    framework: 'jest',
+    instructions: 'Use Jest (describe/it) and expect assertions.'
+  }
+];
 
 const app = express();
 app.use(express.json());
@@ -658,6 +718,79 @@ app.get('/api/sessions/:id', (req, res) => {
   res.json(session);
 });
 
+function runAutodriveScenario({ scenarioPath, title, baseUrl }) {
+  return new Promise((resolve, reject) => {
+    const scriptPath = path.join(SCRIPTS_DIR, 'autodrive.mjs');
+    if (!fs.existsSync(scriptPath)) {
+      return reject(new Error('autodrive script not found'));
+    }
+    const args = [scriptPath];
+    if (title && String(title).trim()) {
+      args.push('--title', String(title).trim());
+    }
+    args.push(scenarioPath);
+    const child = spawn(process.execPath, args, {
+      cwd: ROOT_DIR,
+      env: { ...process.env, BASE_URL: baseUrl }
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', chunk => { stdout += chunk.toString(); });
+    child.stderr.on('data', chunk => { stderr += chunk.toString(); });
+    child.on('error', reject);
+    child.on('close', code => {
+      if (code !== 0) {
+        const err = new Error(`autodrive exited with code ${code}`);
+        err.details = { stdout, stderr };
+        return reject(err);
+      }
+      const match = stdout.match(/\[AUTO\]\s+Created session\s+(\d+)/);
+      resolve({
+        sessionId: match ? match[1] : null,
+        stdout,
+        stderr
+      });
+    });
+  });
+}
+
+app.post('/api/sessions/autodrive', async (req, res) => {
+  try {
+    const { scenario, title } = req.body || {};
+    const scenarioName = String(scenario || 'photo_detector_tests.txt').trim();
+    const scenarioPath = path.resolve(SCENARIOS_DIR, scenarioName);
+    if (!scenarioName) {
+      return res.status(400).json({ error: 'Scenario name is required' });
+    }
+    if (!scenarioPath.startsWith(SCENARIOS_DIR)) {
+      return res.status(400).json({ error: 'Invalid scenario path' });
+    }
+    if (!fs.existsSync(scenarioPath)) {
+      return res.status(404).json({ error: `Scenario file not found: ${scenarioName}` });
+    }
+    const port = Number(process.env.PORT || 4000);
+    const baseUrl = process.env.BASE_URL || `http://127.0.0.1:${port}`;
+    const result = await runAutodriveScenario({ scenarioPath, title, baseUrl });
+    let session = null;
+    if (result.sessionId) {
+      session = getSession(result.sessionId) || null;
+    }
+    res.json({
+      ok: true,
+      sessionId: result.sessionId,
+      session,
+      logs: (result.stdout || '').split('\n').slice(-40).join('\n'), // return tail for context
+      stderr: result.stderr
+    });
+  } catch (err) {
+    console.error('autodrive scenario failed:', err.details || err);
+    res.status(500).json({
+      error: err.message || 'autodrive failed',
+      details: err.details || null
+    });
+  }
+});
+
 // Add a message to a session
 // Add logging to /api/sessions/:id/message endpoint
 app.post('/api/sessions/:id/message', async (req, res) => {
@@ -1010,6 +1143,171 @@ function walkFiles(root) {
   return out;
 }
 
+function chunkFilesForLlm(files = []) {
+  const batches = [];
+  let current = [];
+  let currentChars = 0;
+  for (const f of files) {
+    const content = typeof f.content === 'string' ? f.content : '';
+    const size = content.length;
+    const exceedsCharLimit = currentChars + size > CODE_MAX_CHARS_PER_CHUNK;
+    const exceedsFileLimit = current.length >= CODE_MAX_FILES_PER_CHUNK;
+    if (current.length > 0 && (exceedsCharLimit || exceedsFileLimit)) {
+      batches.push(current);
+      current = [];
+      currentChars = 0;
+    }
+    current.push(f);
+    currentChars += size;
+    if (current.length >= CODE_MAX_FILES_PER_CHUNK || currentChars >= CODE_MAX_CHARS_PER_CHUNK) {
+      batches.push(current);
+      current = [];
+      currentChars = 0;
+    }
+  }
+  if (current.length) batches.push(current);
+  return batches;
+}
+
+function summarizeHardwareSignals(files = []) {
+  const apiTokens = new Set();
+  const constantTokens = new Set();
+  for (const f of files) {
+    const content = String(f.content || '');
+    const apiMatches = content.match(/\b(?:HAL_|I2C_|GPIO_|SPI_|ADC_|UART_|DMA_|PWM_|TIM_)[A-Z0-9_]+\b/g);
+    if (apiMatches) apiMatches.forEach(t => apiTokens.add(t));
+    const constMatches = content.match(/\b0x[0-9a-fA-F]{2,}\b/g);
+    if (constMatches) constMatches.slice(0, 20).forEach(t => constantTokens.add(t));
+  }
+  const parts = [];
+  if (apiTokens.size) {
+    parts.push('Hardware APIs: ' + Array.from(apiTokens).slice(0, 12).join(', '));
+  }
+  if (constantTokens.size) {
+    parts.push('Register constants: ' + Array.from(constantTokens).slice(0, 8).join(', '));
+  }
+  return parts.join('\n');
+}
+
+function extractPrdHighlights(prdText = '') {
+  const lines = String(prdText || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const highlights = [];
+  const keyPattern = /(latency|throughput|performance|fault|error|timeout|safety|sensor|calibration|startup|recovery|accuracy|compliance)/i;
+  for (const line of lines) {
+    if (/^[-*]/.test(line) && line.length <= 200) {
+      highlights.push(line.replace(/^[-*]\s*/, ''));
+    } else if (keyPattern.test(line) && line.length <= 180) {
+      highlights.push(line);
+    }
+    if (highlights.length >= 8) break;
+  }
+  return highlights.join('\n');
+}
+
+function extractInsightKeywords(insights = '') {
+  return String(insights || '')
+    .toLowerCase()
+    .split(/\W+/)
+    .filter(w => w && w.length >= 4)
+    .slice(0, 24);
+}
+
+function prioritizeFileContent(content, insightKeywords = []) {
+  if (typeof content !== 'string') return '';
+  const limit = CODE_MAX_CHARS_PER_FILE;
+  if (content.length <= limit) return content;
+  const lines = content.split(/\r?\n/);
+  const lowerKeywords = Array.isArray(insightKeywords)
+    ? insightKeywords.map(k => String(k || '').toLowerCase()).filter(Boolean)
+    : [];
+  const matchedIndices = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    let matched = HARDWARE_REGEXES.some(re => re.test(line));
+    if (!matched && lowerKeywords.length) {
+      const lower = line.toLowerCase();
+      matched = lowerKeywords.some(word => lower.includes(word));
+    }
+    if (matched) matchedIndices.push(i);
+  }
+  const sections = [];
+  const prelude = lines.slice(0, 80).join('\n');
+  if (prelude) sections.push(prelude);
+  if (matchedIndices.length) {
+    matchedIndices.sort((a, b) => a - b);
+    const ranges = [];
+    let currentStart = null;
+    let currentEnd = null;
+    matchedIndices.forEach(idx => {
+      const start = Math.max(0, idx - 20);
+      const end = Math.min(lines.length, idx + 40);
+      if (currentStart === null) {
+        currentStart = start;
+        currentEnd = end;
+        return;
+      }
+      if (start <= currentEnd + 5) {
+        currentEnd = Math.max(currentEnd, end);
+      } else {
+        ranges.push([currentStart, currentEnd]);
+        currentStart = start;
+        currentEnd = end;
+      }
+    });
+    if (currentStart !== null) ranges.push([currentStart, currentEnd]);
+    ranges.forEach(([start, end]) => {
+      sections.push(lines.slice(start, end).join('\n'));
+    });
+  }
+  if (sections.length < 2) {
+    const tail = lines.slice(-80).join('\n');
+    if (tail) sections.push(tail);
+  }
+  let combined = sections.join('\n\n');
+  if (combined.length > limit) combined = combined.slice(0, limit);
+  return combined || content.slice(0, limit);
+}
+
+function isRealisticTestContent(content) {
+  if (typeof content !== 'string' || !content.trim()) return false;
+  const lower = content.toLowerCase();
+  let score = 0;
+  if (ASSERT_KEYWORDS.some(k => lower.includes(k.toLowerCase()))) score += 1;
+  if (STRICT_KEYWORDS.some(k => lower.includes(k))) score += 1;
+  if (HARDWARE_KEYWORDS.some(k => lower.includes(k))) score += 1;
+  return score >= 2;
+}
+
+function pickTestTarget(chunkFiles) {
+  const counts = new Map();
+  for (const f of chunkFiles) {
+    const extMatch = /\.([a-z0-9]+)$/i.exec(f.path || '');
+    if (!extMatch) continue;
+    const ext = extMatch[1].toLowerCase();
+    counts.set(ext, (counts.get(ext) || 0) + 1);
+  }
+  let chosen = null;
+  if (counts.size) {
+    const ordered = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    for (const [ext] of ordered) {
+      const target = DEFAULT_TEST_TARGETS.find(t => t.exts.includes(ext));
+      if (target) {
+        chosen = target;
+        break;
+      }
+    }
+  }
+  if (!chosen) {
+    chosen = {
+      path: 'tests/generated_tests.txt',
+      language: 'text',
+      framework: '',
+      instructions: 'Write plain text test notes.'
+    };
+  }
+  return { ...chosen };
+}
+
 // Prepare: scan a folder and create a job manifest
 app.post('/api/code/prepare', (req, res) => {
   try {
@@ -1065,13 +1363,22 @@ app.post('/api/code/propose', async (req, res) => {
     const prdAbsPath = path.join(__dirname, '..', session.prdPath);
     let prdText = '';
     try { prdText = fs.readFileSync(prdAbsPath, 'utf-8'); } catch {}
+    const prdInsights = extractPrdHighlights(prdText);
+    const insightKeywords = extractInsightKeywords(prdInsights);
 
     // Load file contents according to manifest
     const filesPayload = [];
+    const truncatedFiles = [];
     for (const f of meta.files) {
       const abs = path.join(meta.codeRoot, f.path);
-      let content = '';
-      try { content = fs.readFileSync(abs, 'utf-8'); } catch {}
+      let original = '';
+      try { original = fs.readFileSync(abs, 'utf-8'); } catch {}
+      let content = prioritizeFileContent(original, insightKeywords);
+      if (content.length < original.length) truncatedFiles.push(f.path);
+      if (content.length > CODE_MAX_CHARS_PER_FILE) {
+        truncatedFiles.push(f.path);
+        content = content.slice(0, CODE_MAX_CHARS_PER_FILE);
+      }
       filesPayload.push({ path: f.path, content });
     }
 
@@ -1089,28 +1396,143 @@ app.post('/api/code/propose', async (req, res) => {
       const map = { js:'JavaScript/Jest', jsx:'JavaScript/Jest', ts:'TypeScript/Jest', tsx:'TypeScript/Jest', py:'Python/pytest', java:'Java/JUnit', kt:'Kotlin/JUnit', cs:'C#/xUnit', rb:'Ruby/RSpec', go:'Go/testing', rs:'Rust/cargo test' };
       langHint = map[top] || top;
     }
-    const llmInput = {
+    const strictMode = STRICT_TEST_MODE;
+    const baseInput = {
       prd: prdText,
       extraPrompt: String(extraPrompt || ''),
-      files: filesPayload,
       llm: codeModel,
       limits: { maxChanges: 50, maxTokens: 4000 },
       langHint
     };
-    // Lightweight diagnostics
-    try {
-      console.log('[CODE PROPOSE] model=%s files=%d prdBytes=%d extraBytes=%d', codeModel, filesPayload.length, prdText.length, String(extraPrompt||'').length);
-    } catch {}
-    const result = await runLLMScript(scriptPath, llmInput);
-    if (result && result.error) {
-      console.error('[CODE PROPOSE] LLM error:', result.error);
-      if (result.traceback) console.error(result.traceback);
-      return res.status(502).json({ error: result.error });
+    let batches = chunkFilesForLlm(filesPayload);
+    let skippedChunks = 0;
+    if (batches.length > CODE_MAX_TOTAL_CHUNKS) {
+      skippedChunks = batches.length - CODE_MAX_TOTAL_CHUNKS;
+      batches = batches.slice(0, CODE_MAX_TOTAL_CHUNKS);
     }
-    const changes = Array.isArray(result.changes) ? result.changes : [];
+    if (batches.length === 0) {
+      return res.json({ jobId, changes: [], notes: '' });
+    }
+    try {
+      console.log('[CODE PROPOSE] model=%s files=%d batches=%d prdBytes=%d extraBytes=%d', codeModel, filesPayload.length, batches.length, prdText.length, String(extraPrompt||'').length);
+    } catch {}
+
+    const notes = [];
+    const aggregatedTargets = new Map();
+    const truncatedSet = new Set(truncatedFiles);
+
+    for (let i = 0; i < batches.length; i++) {
+      const chunkFiles = batches[i];
+      const target = pickTestTarget(chunkFiles);
+      const targetPath = String(target.path || '').replace(/^\//, '');
+      let targetState = aggregatedTargets.get(targetPath);
+      if (!targetState) {
+        let existingContent = '';
+        let existed = false;
+        try {
+          existingContent = fs.readFileSync(path.join(meta.codeRoot, targetPath), 'utf-8');
+          existed = true;
+        } catch {}
+        targetState = { content: existingContent, existed, dirty: false };
+        aggregatedTargets.set(targetPath, targetState);
+      }
+      const previousContent = targetState.content;
+      const hardwareSummary = summarizeHardwareSignals(chunkFiles);
+      const baseAnalysis = {
+        hardwareSummary,
+        prdInsights,
+        strictMode
+      };
+      const attemptNotes = [];
+      const maxAttempts = strictMode ? 2 : 1;
+      let analysisPayload = { ...baseAnalysis, strictRetry: false };
+      let finalContent = null;
+      let strictTriggered = false;
+
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const chunkInput = {
+          ...baseInput,
+          files: chunkFiles,
+          chunk: { index: i, total: batches.length },
+          truncatedPaths: chunkFiles.filter(f => truncatedSet.has(f.path)).map(f => f.path),
+          testTarget: {
+            path: targetPath,
+            language: target.language,
+            framework: target.framework,
+            instructions: target.instructions,
+            existingContent: targetState.content
+          },
+          analysis: analysisPayload
+        };
+        try {
+          console.log('[CODE PROPOSE] chunk %d/%d (%d files) attempt %d', i + 1, batches.length, chunkFiles.length, attempt + 1);
+        } catch {}
+        const result = await runLLMScript(scriptPath, chunkInput);
+        if (result && result.error) {
+          console.error('[CODE PROPOSE] LLM error (chunk %d/%d attempt %d): %s', i + 1, batches.length, attempt + 1, result.error);
+          if (result.traceback) console.error(result.traceback);
+          return res.status(502).json({ error: result.error, chunk: i, attempt });
+        }
+        if (result && result.notes) attemptNotes.push(String(result.notes));
+        const chunkChanges = Array.isArray(result?.changes) ? result.changes : [];
+        const desiredPath = targetPath;
+        let candidateContent = null;
+        const matchingChange = chunkChanges.find(ch => String(ch.path || '').replace(/^\//, '') === desiredPath && ['add','modify'].includes(String(ch.action || '').toLowerCase()));
+        if (matchingChange && typeof matchingChange.new_content === 'string') {
+          candidateContent = matchingChange.new_content;
+        } else if (!matchingChange && chunkChanges.length) {
+          const fallback = chunkChanges.find(ch => ['add','modify'].includes(String(ch.action || '').toLowerCase()));
+          if (fallback && typeof fallback.new_content === 'string') {
+            console.warn('[CODE PROPOSE] Chunk %d produced unexpected path %s, remapping to %s', i + 1, fallback.path, desiredPath);
+            candidateContent = fallback.new_content;
+          }
+        }
+
+        if (typeof candidateContent === 'string') {
+          if (!strictMode || attempt === maxAttempts - 1 || isRealisticTestContent(candidateContent)) {
+            finalContent = candidateContent;
+            break;
+          }
+          strictTriggered = true;
+          analysisPayload = {
+            ...baseAnalysis,
+            strictRetry: true,
+            strictFeedback: STRICT_REALISM_FEEDBACK
+          };
+          continue;
+        } else {
+          break;
+        }
+      }
+
+      if (attemptNotes.length) notes.push(...attemptNotes);
+      if (strictTriggered && finalContent) {
+        notes.push(`Strict realism enforced for ${targetPath}.`);
+      } else if (strictTriggered && !finalContent) {
+        notes.push(`Strict realism retry produced no additional content for ${targetPath}.`);
+      }
+
+      if (finalContent !== null) {
+        if (finalContent !== previousContent) {
+          targetState.content = finalContent;
+          targetState.dirty = true;
+        } else {
+          targetState.content = finalContent;
+        }
+      }
+      notes.push(`Chunk ${i + 1}: targeted ${targetPath}${strictTriggered ? ' (strict)' : ''}.`);
+    }
+
+    const changes = [];
+    for (const [pathKey, state] of aggregatedTargets.entries()) {
+      const action = state.existed ? 'modify' : 'add';
+      if (!state.dirty && state.existed) continue;
+      changes.push({ path: pathKey, action, new_content: state.content });
+    }
 
     // Stage changes
     const staging = path.join(jobDir, 'staging');
+    try { fs.rmSync(staging, { recursive: true, force: true }); } catch {}
     fs.mkdirSync(staging, { recursive: true });
     for (const ch of changes) {
       const rel = String(ch.path || '').replace(/^\//, '');
@@ -1127,8 +1549,22 @@ app.post('/api/code/propose', async (req, res) => {
         fs.writeFileSync(mark, 'delete', 'utf-8');
       }
     }
-    fs.writeFileSync(path.join(jobDir, 'proposed.json'), JSON.stringify({ changes, notes: String(result.notes || '') }, null, 2));
-    res.json({ jobId, changes });
+    const metaNotes = [];
+    if (truncatedFiles.length) {
+      metaNotes.push(`Trimmed ${truncatedFiles.length} file(s) to ${CODE_MAX_CHARS_PER_FILE} chars for token limits.`);
+    }
+    if (skippedChunks > 0) {
+      metaNotes.push(`Skipped ${skippedChunks} additional chunk(s); refine code root or adjust CODE_MAX_TOTAL_CHUNKS.`);
+    }
+    const combinedNotes = [...notes.filter(Boolean), ...metaNotes].join('\n');
+    const proposalMeta = {
+      changes,
+      notes: combinedNotes,
+      truncatedFiles,
+      skippedChunks
+    };
+    fs.writeFileSync(path.join(jobDir, 'proposed.json'), JSON.stringify(proposalMeta, null, 2));
+    res.json({ jobId, changes, notes: combinedNotes, truncatedFiles, skippedChunks });
   } catch (e) {
     console.error('[CODE PROPOSE] Failed:', e?.message || e);
     if (e && e.stderr) console.error('[CODE PROPOSE] stderr:', e.stderr);

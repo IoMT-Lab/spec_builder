@@ -1,0 +1,53 @@
+{
+  "jobId": "1761119243906",
+  "sessionId": "1761111163792",
+  "codeRoot": "/Users/evan/Dev/p3/src",
+  "files": [
+    {
+      "path": "utils/test_harness.c",
+      "size": 2140
+    },
+    {
+      "path": "utils/serial.c",
+      "size": 2047
+    },
+    {
+      "path": "testing/tests.c",
+      "size": 3206
+    },
+    {
+      "path": "system/system_stm32wb0x.c",
+      "size": 12321
+    },
+    {
+      "path": "system/sysmem.c",
+      "size": 2986
+    },
+    {
+      "path": "system/syscalls.c",
+      "size": 5109
+    },
+    {
+      "path": "system/stm32wb0x_it.c",
+      "size": 5070
+    },
+    {
+      "path": "system/stm32wb0x_hal_msp.c",
+      "size": 7943
+    },
+    {
+      "path": "main.c",
+      "size": 10478
+    },
+    {
+      "path": "app/as7341.c",
+      "size": 3375
+    },
+    {
+      "path": "app/app.c",
+      "size": 1931
+    }
+  ],
+  "bytes": 56606,
+  "createdAt": "2025-10-22T07:47:23.906Z"
+}

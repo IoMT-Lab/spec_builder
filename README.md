@@ -71,6 +71,7 @@ Getting started (quick local developer steps)
 		 ```
 
 3. Open the frontend app in your browser (usually http://localhost:3000 or as printed by the dev server). Create a session and start chatting with the LLM.
+4. Want a canned run? Open the Sessions sidebar and click **Auto-generate PRD** to execute the bundled `scenarios/photo_detector_tests.txt` script and populate a new session automatically.
 
 Key file locations and what they do
 

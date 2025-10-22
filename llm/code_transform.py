@@ -59,10 +59,23 @@ def main():
         files = data.get('files', []) or []
         llm = data.get('llm', 'gpt-4o')
         limits = data.get('limits', {}) or {}
+        chunk = data.get('chunk', {}) or {}
+        truncated_paths = data.get('truncatedPaths') or []
+        analysis = data.get('analysis') or {}
         max_changes = int(limits.get('maxChanges', 50))
         max_tokens = int(limits.get('maxTokens', 4000))
         lang_hint = (data.get('langHint') or '').strip()
         DEBUG = bool(os.getenv('CODE_DEBUG'))
+        chunk_index_raw = chunk.get('index')
+        chunk_total_raw = chunk.get('total')
+        try:
+            chunk_index = int(chunk_index_raw)
+        except (TypeError, ValueError):
+            chunk_index = None
+        try:
+            chunk_total = int(chunk_total_raw)
+        except (TypeError, ValueError):
+            chunk_total = None
 
         # Compose a compact context pack to keep tokens reasonable
         manifest_lines = []
@@ -77,6 +90,19 @@ def main():
             if isinstance(c, str):
                 file_blobs.append(f"\n=== {p} ===\n" + c)
 
+        test_target = data.get('testTarget') or {}
+        target_path = str(test_target.get('path', '') or '')
+        target_instructions = str(test_target.get('instructions', '') or '')
+        target_language = str(test_target.get('language', '') or '')
+        target_framework = str(test_target.get('framework', '') or '')
+        existing_test_content_full = str(test_target.get('existingContent', '') or '')
+        existing_test_content = existing_test_content_full[:15000]
+        hardware_summary = str(analysis.get('hardwareSummary', '') or '')
+        prd_insights = str(analysis.get('prdInsights', '') or '')
+        strict_mode = bool(analysis.get('strictMode'))
+        strict_retry = bool(analysis.get('strictRetry'))
+        strict_feedback = str(analysis.get('strictFeedback', '') or '')
+
         system = {
             'role': 'system',
             'content': (
@@ -85,13 +111,63 @@ def main():
                 "Allowed actions: add|modify|delete. For add/modify include FULL new_content. "
                 f"Return no more than {max_changes} changes. Do not include commentary or code fences. "
                 + (f"Primary language/framework hint: {lang_hint}. " if lang_hint else "")
+                + (
+                    f"All test updates must be written to {target_path}. "
+                    if target_path else ""
+                )
                 + "If the request is about tests and no tests exist, propose adding tests under a conventional directory (e.g., tests/, __tests__/ for JS, pytest for Python, JUnit for Java)."
+                + (
+                    f" Use {target_framework} style in {target_language}."
+                    if target_framework else ""
+                )
+                + (
+                    f" {target_instructions}"
+                    if target_instructions else ""
+                )
+                + (
+                    " Ensure tests cover both nominal and failure paths, simulate hardware driver error returns, and avoid placeholder assertions."
+                    if strict_mode else ""
+                )
+                + (
+                    " Previous attempt lacked realistic hardware coverage. Address the reviewer feedback explicitly."
+                    if strict_retry else ""
+                )
             )
         }
         user = {
             'role': 'user',
             'content': (
                 "PRD (markdown):\n" + prd + "\n\n" +
+                (
+                    f"This is chunk {chunk_index + 1} of {chunk_total}. "
+                    "Only modify or add files listed below.\n\n"
+                    if chunk_total is not None else ""
+                ) +
+                (
+                    "Some files were truncated to stay within context limits:\n" +
+                    "\n".join(truncated_paths) + "\n\n"
+                    if truncated_paths else ""
+                ) +
+                (
+                    f"Write all test updates to the single file: {target_path}.\n"
+                    if target_path else ""
+                ) +
+                (
+                    "Existing test file content:\n" + existing_test_content + "\n\n"
+                    if existing_test_content else "Existing test file content:\n\n"
+                ) +
+                (
+                    "Hardware cues detected:\n" + hardware_summary + "\n\n"
+                    if hardware_summary else ""
+                ) +
+                (
+                    "Key PRD expectations that tests must satisfy:\n" + prd_insights + "\n\n"
+                    if prd_insights else ""
+                ) +
+                (
+                    "Reviewer feedback: " + strict_feedback + "\n\n"
+                    if strict_feedback else ""
+                ) +
                 ("Instruction:\n" + extra + "\n\n" if extra else "") +
                 "Manifest (relative paths):\n" + "\n".join(manifest_lines[:1000]) + "\n\n" +
                 "Files:\n" + "\n".join(file_blobs[:200])
@@ -110,7 +186,10 @@ def main():
             raw = get_llm_response_from_context([system, user], llm, temperature=0.1, max_tokens=max_tokens)
         if DEBUG:
             try:
-                sys.stderr.write(f"[CODE_DEBUG] files={len(files)} prdChars={len(prd)} extraChars={len(extra)}\n")
+                chunk_label = 'N/A'
+                if chunk_total is not None and chunk_index is not None:
+                    chunk_label = f"{chunk_index + 1}/{chunk_total}"
+                sys.stderr.write(f"[CODE_DEBUG] files={len(files)} prdChars={len(prd)} extraChars={len(extra)} chunk={chunk_label} truncated={len(truncated_paths)} target={target_path or 'n/a'} strict={strict_mode} retry={strict_retry}\n")
                 sys.stderr.write(f"[CODE_DEBUG] raw_head={str(raw)[:4000]}\n")
             except Exception:
                 pass
