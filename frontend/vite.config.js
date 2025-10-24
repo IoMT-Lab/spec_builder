@@ -9,9 +9,10 @@ export default defineConfig({
       '/api/llm': 'http://localhost:4000',
       '/api/health': 'http://localhost:4000',
       '/api/markdown': 'http://localhost:4000',
-      '/api/sessions': 'http://localhost:4000', // <-- Updated proxy for sessions
-      '/api/prd': 'http://localhost:4000', // <-- Updated proxy for PRD endpoints
-      '/api/code': 'http://localhost:4000', // Proxy Code Preview endpoints
+      '/api/sessions': 'http://localhost:4000',
+      '/api/sessions/autodrive': 'http://localhost:4000',
+      '/api/prd': 'http://localhost:4000',
+      '/api/code': 'http://localhost:4000',
       '/api/codegen': 'http://localhost:4000',
     },
   },

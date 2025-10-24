@@ -1,0 +1,37 @@
+{
+  "description": "Initial turn describing the photo-detector test harness.",
+  "llm": "gpt-5-nano",
+  "max_tokens": 900,
+  "reply_temperature": 0.6,
+  "conversation": [
+    {
+      "role": "system",
+      "content": "You are an expert product manager and technical writer helping a user shape a PRD via conversation. Keep replies brief and actionable (2–5 sentences). Ask one focused question when key information is missing. Do not invent facts. Do not paste the entire PRD in chat replies; propose changes concisely and rely on the PRD draft process."
+    },
+    {
+      "role": "system",
+      "content": "Agenda: Executive Summary [Project Overview, Goals & Success Metrics]; Requirements [Functional Requirements, Non-functional Requirements]; Testing Strategy [Unit Tests, Integration Tests]; Risks & Mitigations [Key Risks, Mitigations]. Next focus index: section=0, field=0. Prioritize missing or weak fields first."
+    },
+    {
+      "role": "assistant",
+      "content": "Welcome! Please provide a brief description of your project."
+    },
+    {
+      "role": "user",
+      "content": "This program uses a photo detector over I²C. The driver already handles register reads and writes, and it has functions for turning the LED on and off. What I need are unit tests that confirm all the critical parts of the system behave correctly."
+    }
+  ],
+  "structure": {
+    "agenda": [
+      { "name": "Executive Summary", "fields": ["Project Overview", "Goals & Success Metrics"] },
+      { "name": "Requirements", "fields": ["Functional Requirements", "Non-functional Requirements"] },
+      { "name": "Testing Strategy", "fields": ["Unit Tests", "Integration Tests"] },
+      { "name": "Risks & Mitigations", "fields": ["Key Risks", "Mitigations"] }
+    ],
+    "nextFocus": { "sectionIndex": 0, "fieldIndex": 0 },
+    "cursor": { "sectionIndex": 0, "fieldIndex": 0 },
+    "focusStack": []
+  },
+  "prompt": "This program uses a photo detector over I²C. The driver already handles register reads and writes, and it has functions for turning the LED on and off. What I need are unit tests that confirm all the critical parts of the system behave correctly.",
+  "prev_prd_draft": "# Product Requirements Document\\n\\n## Executive Summary\\n- **Project Overview:** [MISSING]\\n- **Goals & Success Metrics:** [MISSING]\\n\\n## Requirements\\n- **Functional Requirements:** [MISSING]\\n- **Non-functional Requirements:** [MISSING]\\n\\n## Testing Strategy\\n- **Unit Tests:** [MISSING]\\n- **Integration Tests:** [MISSING]\\n\\n## Risks & Mitigations\\n- **Key Risks:** [MISSING]\\n- **Mitigations:** [MISSING]"
+}

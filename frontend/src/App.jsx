@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import './App.css';
+import ReactMarkdown from 'react-markdown';
 import MarkdownPanel from './MarkdownPanel.jsx';
 import DraftsmanBackground from './DraftsmanBackground.jsx';
 import DraftsmanPanel from './DraftsmanPanel.jsx';
@@ -230,17 +231,26 @@ function App() {
     if (autodriveRunning) return;
     setAutodriveRunning(true);
     setAutodriveError('');
+    // Kick off polling so the sidebar updates while the scenario runs
+    const pollId = setInterval(fetchSessions, 2000);
+    // Grab the latest list immediately so the newly created session appears
+    fetchSessions();
     try {
       const res = await fetch('/api/sessions/autodrive', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ scenario: 'photo_detector_tests.txt' })
       });
+      const raw = await res.text();
       if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `Scenario run failed (${res.status})`);
+        throw new Error(raw || `Scenario run failed (${res.status})`);
       }
-      const data = await res.json();
+      let data = null;
+      try {
+        data = raw ? JSON.parse(raw) : null;
+      } catch (err) {
+        throw new Error(raw || 'Autodrive returned non-JSON response');
+      }
       if (data.session) {
         const session = data.session;
         setSessions(prev => {
@@ -273,7 +283,11 @@ function App() {
       console.error('Autodrive scenario failed:', err);
       setAutodriveError(err.message || 'Failed to run scenario');
     } finally {
+      clearInterval(pollId);
+      await fetchSessions();
       setAutodriveRunning(false);
+      // Force a visible refresh so the user sees the results immediately
+      setTimeout(() => window.location.reload(), 1500);
     }
   };
 
@@ -545,10 +559,10 @@ function App() {
           onMouseDown={() => setSidebarOpen(false)}
         />
       )}
-      <div className={`app-main`}>
-        {sidebar}
-        <div className="main-content">
-          {/* Top Panels Row */}
+        <div className={`app-main`}>
+          {sidebar}
+          <div className="main-content">
+            {/* Top Panels Row */}
           {expandedPanel === null ? (
             <section className="top-panels">
               <DraftsmanPanel
@@ -613,15 +627,45 @@ function App() {
                   )}
                   {conversation.length === 0 && !loading && 'LLM Replies go here'}
                   {conversation.map((msg, idx) => {
-                    // Highlight user message spans that were extracted as facts
-                    const spans = Array.isArray(msg.facts)
-                      ? Array.from(new Set(msg.facts.map(f => (f && typeof f.exact_span === 'string' && f.exact_span.trim()) ? f.exact_span.trim() : (f && typeof f.text === 'string' ? f.text.trim() : '')).filter(Boolean)))
-                      : [];
-                    const content = String(msg.content || '');
-                    const parts = highlightSpans(content, spans);
+                    const rawContent = msg?.content;
+                    const body = typeof rawContent === 'string'
+                      ? rawContent
+                      : rawContent == null
+                        ? ''
+                        : (() => {
+                            try {
+                              if (Array.isArray(rawContent)) {
+                                return rawContent.map(piece => {
+                                  if (typeof piece === 'string') return piece;
+                                  if (piece && typeof piece.text === 'string') return piece.text;
+                                  return JSON.stringify(piece);
+                                }).join('\n');
+                              }
+                              if (typeof rawContent === 'object') {
+                                return JSON.stringify(rawContent, null, 2);
+                              }
+                              return String(rawContent);
+                            } catch {
+                              return String(rawContent);
+                            }
+                          })();
                     return (
-                      <div key={idx} className={msg.role === 'user' ? 'user-msg' : 'assistant-msg'} style={{ textAlign: msg.role === 'user' ? 'right' : 'left', margin: '8px 0' }}>
-                        <b>{msg.role === 'user' ? 'You' : 'LLM'}:</b> {msg.role === 'user' ? parts : content}
+                      <div
+                        key={idx}
+                        className={`chat-msg ${msg.role === 'user' ? 'chat-msg--user' : 'chat-msg--assistant'}`}
+                      >
+                        <div className="chat-msg__header">{msg.role === 'user' ? 'You' : 'LLM'}</div>
+                      <ReactMarkdown
+                        components={{
+                          p: (props) => <p className="chat-msg__p" {...props} />,
+                          ul: (props) => <ul className="chat-msg__ul" {...props} />,
+                          ol: (props) => <ol className="chat-msg__ol" {...props} />,
+                          li: (props) => <li className="chat-msg__li" {...props} />,
+                          code: (props) => <code className="chat-msg__code" {...props} />
+                        }}
+                      >
+                        {body}
+                      </ReactMarkdown>
                       </div>
                     );
                   })}
@@ -694,43 +738,3 @@ function App() {
 }
 
 export default App;
-
-// --- Utilities ---
-function highlightSpans(text, spans) {
-  if (!spans || spans.length === 0 || !text) return text;
-  const ranges = [];
-  const lower = text.toLowerCase();
-  for (const span of spans) {
-    const needle = span.toLowerCase();
-    if (!needle) continue;
-    let start = 0;
-    while (true) {
-      const idx = lower.indexOf(needle, start);
-      if (idx === -1) break;
-      ranges.push({ start: idx, end: idx + needle.length });
-      start = idx + needle.length;
-    }
-  }
-  if (ranges.length === 0) return text;
-  // Merge overlapping ranges
-  ranges.sort((a, b) => a.start - b.start || a.end - b.end);
-  const merged = [];
-  for (const r of ranges) {
-    if (merged.length === 0 || r.start > merged[merged.length - 1].end) {
-      merged.push({ ...r });
-    } else {
-      merged[merged.length - 1].end = Math.max(merged[merged.length - 1].end, r.end);
-    }
-  }
-  const out = [];
-  let cursor = 0;
-  merged.forEach((r, i) => {
-    if (cursor < r.start) out.push(<span key={`t-${i}-${cursor}`}>{text.slice(cursor, r.start)}</span>);
-    out.push(
-      <mark key={`m-${i}-${r.start}`} style={{ background: '#fff3cd', padding: '0 2px', borderRadius: 2 }}>{text.slice(r.start, r.end)}</mark>
-    );
-    cursor = r.end;
-  });
-  if (cursor < text.length) out.push(<span key={`t-end-${cursor}`}>{text.slice(cursor)}</span>);
-  return out;
-}
