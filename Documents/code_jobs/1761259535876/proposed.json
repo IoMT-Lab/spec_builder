@@ -1,0 +1,9 @@
+{
+  "changes": [],
+  "notes": "Trimmed 1 file(s) to 40000 chars for token limits.",
+  "truncatedFiles": [
+    "Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_i2c.c"
+  ],
+  "skippedChunks": 0,
+  "extraPrompt": "Develop unit tests for an I²C photo detector driver. Ensure the initialization sequence powers on the device, verifies auxiliary, revision, and base IDs vs. constants, then enables the LED control. Test I²C comms, LED operations, and register read/writes. Cover measurement modes: polling (read every 5s, pulse LED, unset interrupts) and interrupts (thresholds, trigger tests, negative testing on impossible thresholds). Handle edge cases: invalid IDs, misconfigurations disabling modes, non-zero vs zero measurements. Integrate with automated frameworks for 95%+ pass rate."
+}

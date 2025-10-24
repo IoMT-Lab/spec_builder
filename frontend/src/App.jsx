@@ -10,7 +10,9 @@ function App() {
   console.log('App component rendered');
 
   const [expandedPanel, setExpandedPanel] = useState(null);
-  const [llmProvider, setLlmProvider] = useState('gpt5');
+  const [llmProvider, setLlmProvider] = useState(
+    (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_DEFAULT_LLM) || 'gpt5'
+  );
   const [apiCheckResult, setApiCheckResult] = useState('');
   const [apiCheckLoading, setApiCheckLoading] = useState(false);
   // Session state

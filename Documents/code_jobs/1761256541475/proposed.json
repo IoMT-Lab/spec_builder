@@ -1,0 +1,13 @@
+{
+  "changes": [
+    {
+      "path": "tests/generated_tests.c",
+      "action": "add",
+      "new_content": "#include \"unity.h\"\n#include \"app/as7341.h\"\n#include \"utils/test_harness.h\"\n#include \"globals.h\"\n\nI2C_HandleTypeDef i2c_handle;\n\nvoid setUp(void) {\n    HAL_I2C_Init(&i2c_handle);\n    PD_I2c_Init(&i2c_handle);\n}\n\nvoid tearDown(void) {\n    HAL_I2C_DeInit(&i2c_handle);\n}\n\nvoid test_i2c_initialization(void) {\n    PD_I2c_Init(&i2c_handle);\n    TEST_ASSERT_EQUAL(&i2c_handle, get_i2c());\n}\n\nvoid test_device_power_on(void) {\n    PD_Power_On();\n    TEST_ASSERT_EQUAL(1, read_register(REG_ENABLE));\n}\n\nvoid test_device_power_off(void) {\n    PD_Power_Off();\n    TEST_ASSERT_EQUAL(0, read_register(REG_ENABLE));\n}\n\nvoid test_led_control(void) {\n    PD_LED_On();\n    TEST_ASSERT_EQUAL_HEX8(0b10000100, read_register(REG_LED));\n\n    PD_LED_Off();\n    TEST_ASSERT_EQUAL_HEX8(0b00000100, read_register(REG_LED));\n}\n\nvoid test_measurement_enable(void) {\n    PD_Measurement_Enable();\n    TEST_ASSERT_TRUE(PD_Measurement_Enabled());\n}\n\nvoid test_measurement_disable(void) {\n    PD_Measurement_Disable();\n    TEST_ASSERT_FALSE(PD_Measurement_Enabled());\n}\n\nvoid test_polling_mode_measurements(void) {\n    PD_Measurement_Enable();\n    HAL_Delay(5000);\n    TEST_ASSERT_FALSE(PD_Get_LowInterrupt());\n    TEST_ASSERT_FALSE(PD_Get_HighInterrupt());\n}\n\nvoid test_interrupt_mode_measurements(void) {\n    PD_Set_LowThreshold(100);\n    PD_Set_HighThreshold(1000);\n    PD_Enable_Interrupt();\n\n    wait_for_measurement();\n\n    TEST_ASSERT_TRUE(PD_Get_LowInterrupt() || PD_Get_HighInterrupt());\n}\n\nvoid test_measurement_non_zero(void) {\n    uint16_t measurement = PD_Get_Value();\n    TEST_ASSERT_GREATER_THAN(0, measurement);\n}\n\nint main(void) {\n    UNITY_BEGIN();\n    RUN_TEST(test_i2c_initialization);\n    RUN_TEST(test_device_power_on);\n    RUN_TEST(test_device_power_off);\n    RUN_TEST(test_led_control);\n    RUN_TEST(test_measurement_enable);\n    RUN_TEST(test_measurement_disable);\n    RUN_TEST(test_polling_mode_measurements);\n    RUN_TEST(test_interrupt_mode_measurements);\n    RUN_TEST(test_measurement_non_zero);\n    return UNITY_END();\n}"
+    }
+  ],
+  "notes": "Added unit tests for I²C initialization, device power, LED control, and measurement modes in `tests/generated_tests.c`.",
+  "truncatedFiles": [],
+  "skippedChunks": 0,
+  "extraPrompt": "I need unit tests for this repo in alignment with the PRD"
+}

@@ -100,6 +100,7 @@ API endpoints used by the script
 - `GET /api/sessions/:id/prd/diff` — check for proposed PRD drafts/diffs; used to detect if the LLM produced a temp PRD.
 - `POST /api/sessions/:id/prd/accept` — accept a temp PRD draft.
 - `POST /api/sessions/:id/prd/merge` — fallback merge endpoint used if accept fails.
+- `POST /api/codegen/run` — perform a one-shot code generation pass using the accepted PRD plus user instructions, without invoking the PRD drafting loop.
 
 Environment variables & requirements
 - `BASE_URL` — base URL for the backend (default: `http://localhost:4000`).
@@ -121,6 +122,24 @@ Notes, safety, and how to extend
 - The driver will auto-accept PRD changes when it sees a temp PRD; this makes it useful for regression testing but potentially dangerous if used on production data—be careful when running against real repositories or important drafts.
 - Add new scenario files under `scenarios/` to exercise other flows. Keep each user utterance on its own line; the script strips blank lines.
 - The driver is intentionally simple; it is a good starting point for adding more test assertions, timeouts, or scripted checks (for example, validate that the final PRD contains expected headings or that an assurance case contains a named claim).
+
+Code Preview (GUI) workflow
+- Use **Scan Code** to build a job manifest; the backend returns a file list so you can decide what to send to the LLM.
+- Select one or more files in the checklist—the prompt only includes the files you tick plus the accepted PRD and any extra instructions you provide. The scan step now asks the LLM to recommend both the target files and a starter instruction prompt; those arrive pre‑selected/pre‑filled so you can run immediately.
+- Click **Propose Changes** to call `/api/codegen/run`; the backend issues a single LLM request (no PRD drafting) and stages the returned edits.
+- Review the staged diff in the panel and accept or reject as before.
+
+Code-only generation helper (`scripts/run-codegen.mjs`)
+-------------------------------------------------------
+
+Once the PRD is complete, you can bypass the chat pipeline entirely and request code updates directly:
+
+```bash
+node scripts/run-codegen.mjs --session 1761243812423 --code-root /path/to/spec_builder scenarios/photo_detector_tests.txt
+```
+
+The script reads the instruction file, calls `POST /api/codegen/run`, and prints the staged diff plus any planner notes. The backend reuses the same diff/accept workflow, so you can still review changes in the UI or call `/api/code/diff/:jobId` and `/api/code/accept/:jobId` manually. Leave the instruction file empty if you want to rely on the LLM‑recommended prompt from the scan step.
+Add `--files path1,path2` when you want to restrict the request to specific files from the CLI.
 
 
 Design and implementation notes (important details)

@@ -1,0 +1,21 @@
+{
+  "changes": [],
+  "notes": "Trimmed 13 file(s) to 40000 chars for token limits.",
+  "truncatedFiles": [
+    "Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_uart.c",
+    "Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_i2c.c",
+    "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_rcc.h",
+    "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_system.h",
+    "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_usart.h",
+    "Drivers/STM32WB0x_HAL_Driver/Inc/Legacy/stm32_hal_legacy.h",
+    "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_rcc.h",
+    "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_pwr.h",
+    "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_dma.h",
+    "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_hal_uart.h",
+    "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_pwr.h",
+    "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_lpuart.h",
+    "Drivers/STM32WB0x_HAL_Driver/Inc/stm32wb0x_ll_i2c.h"
+  ],
+  "skippedChunks": 0,
+  "extraPrompt": ""
+}

@@ -12,6 +12,7 @@ export default defineConfig({
       '/api/sessions': 'http://localhost:4000', // <-- Updated proxy for sessions
       '/api/prd': 'http://localhost:4000', // <-- Updated proxy for PRD endpoints
       '/api/code': 'http://localhost:4000', // Proxy Code Preview endpoints
+      '/api/codegen': 'http://localhost:4000',
     },
   },
 })

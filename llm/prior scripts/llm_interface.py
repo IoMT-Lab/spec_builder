@@ -38,6 +38,13 @@ def get_llm_response_from_context(messages: list, model_name: str, temperature: 
 
     def _call(kwargs: dict) -> str:
         resp = client.responses.create(**kwargs)
+        texts = []
+        for item in getattr(resp, "output", []) or []:
+            for chunk in getattr(item, "content", []) or []:
+                if getattr(chunk, "type", None) == "output_text":
+                    texts.append(str(getattr(chunk, "text", "")))
+        if texts:
+            return "".join(texts)
         return getattr(resp, "output_text", None) or str(resp)
 
     base = {
@@ -47,25 +54,35 @@ def get_llm_response_from_context(messages: list, model_name: str, temperature: 
     if max_tokens is not None:
         base["max_output_tokens"] = max_tokens
 
+    def _apply_temperature(kwargs: dict) -> dict:
+        if model_name.lower().startswith("gpt-5"):
+            kwargs.pop("temperature", None)
+            return kwargs
+        if "temperature" not in kwargs:
+            kwargs["temperature"] = temperature
+        return kwargs
+
     # Try, in order:
     # 1) base + response_format (no temperature)
     try:
         first = dict(base)
         if response_format is not None:
             first["response_format"] = response_format
-        return _call(first)
+            first.setdefault("reasoning", {"effort": "none"})
+        return _call(_apply_temperature(first))
     except Exception:
         # 2) base only (no temperature, no response_format)
         try:
-            return _call(dict(base))
+            fallback = _apply_temperature(dict(base))
+            return _call(fallback)
         except Exception:
             # 3) base + temperature (+ response_format if provided)
             try:
                 final = dict(base)
-                final["temperature"] = temperature
                 if response_format is not None:
                     final["response_format"] = response_format
-                return _call(final)
+                    final.setdefault("reasoning", {"effort": "none"})
+                return _call(_apply_temperature(final))
             except Exception as e3:
                 return f"An error occurred while calling the OpenAI API\n{str(e3)}"
 

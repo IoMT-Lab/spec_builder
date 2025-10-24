@@ -63,7 +63,15 @@ def main():
         truncated_paths = data.get('truncatedPaths') or []
         analysis = data.get('analysis') or {}
         max_changes = int(limits.get('maxChanges', 50))
-        max_tokens = int(limits.get('maxTokens', 4000))
+        env_max_tokens = os.getenv("CODEGEN_MAX_OUTPUT_TOKENS")
+        if env_max_tokens is not None:
+            try:
+                max_tokens = int(env_max_tokens)
+            except ValueError:
+                max_tokens = 12000
+        else:
+            max_tokens = int(limits.get('maxTokens', 12000))
+        max_tokens = max(2000, min(max_tokens, 60000))
         lang_hint = (data.get('langHint') or '').strip()
         DEBUG = bool(os.getenv('CODE_DEBUG'))
         chunk_index_raw = chunk.get('index')
@@ -80,6 +88,7 @@ def main():
         # Compose a compact context pack to keep tokens reasonable
         manifest_lines = []
         file_blobs = []
+        max_file_blobs = int(os.getenv('CODE_MAX_FILE_BLOBS') or 6)
         for f in files:
             p = str(f.get('path',''))
             c = f.get('content','')
@@ -88,7 +97,8 @@ def main():
             manifest_lines.append(p)
             # Keep each file section bounded
             if isinstance(c, str):
-                file_blobs.append(f"\n=== {p} ===\n" + c)
+                if len(file_blobs) < max_file_blobs:
+                    file_blobs.append(f"\n=== {p} ===\n" + c)
 
         test_target = data.get('testTarget') or {}
         target_path = str(test_target.get('path', '') or '')
@@ -193,6 +203,17 @@ def main():
                 sys.stderr.write(f"[CODE_DEBUG] raw_head={str(raw)[:4000]}\n")
             except Exception:
                 pass
+        if os.getenv('CODE_DEBUG'):
+            try:
+                chunk_label = 'N/A'
+                if chunk_total is not None and chunk_index is not None:
+                    chunk_label = f"{chunk_index + 1}/{chunk_total}"
+                print('[CODE_DEBUG_RAW]', json.dumps({
+                    'chunk': chunk_label,
+                    'raw': raw
+                }), file=sys.stderr)
+            except Exception:
+                pass
         try:
             parsed = json.loads(_extract_json_payload(raw))
         except Exception:
@@ -204,7 +225,17 @@ def main():
                     sys.stderr.write(f"[CODE_DEBUG] repaired_head={str(repaired)[:4000]}\n")
                 except Exception:
                     pass
-            parsed = json.loads(_extract_json_payload(repaired))
+            try:
+                parsed = json.loads(_extract_json_payload(repaired))
+            except Exception:
+                # Last-resort salvage: clip partial JSON to last complete object
+                payload = _extract_json_payload(raw)
+                last_close = payload.rfind('"new_content"')
+                brace_index = payload.rfind('}', last_close)
+                array_index = payload.rfind(']', brace_index)
+                if array_index != -1:
+                    payload = payload[:array_index] + ']}'
+                parsed = json.loads(payload)
 
         # Normalize result structure
         changes = []
@@ -224,9 +255,9 @@ def main():
             nudgesys = {'role':'system','content':'Output STRICT JSON only. Add at least one file if none were proposed.'}
             nudger = {'role':'user','content':'If no code edits were proposed, add a file tests/TEST_PLAN.md with a bullet list of test cases derived from the PRD.'}
             try:
-                nraw = get_llm_response_from_context([nudgesys, nudger], llm, temperature=0.1, response_format={'type':'json_object'}, max_tokens=1200)
+                nraw = get_llm_response_from_context([nudgesys, nudger], llm, temperature=0.1, response_format={'type':'json_object'}, max_tokens=min(max_tokens, 2000))
             except Exception:
-                nraw = get_llm_response_from_context([nudgesys, nudger], llm, temperature=0.1, max_tokens=1200)
+                nraw = get_llm_response_from_context([nudgesys, nudger], llm, temperature=0.1, max_tokens=min(max_tokens, 2000))
             try:
                 nparsed = json.loads(_extract_json_payload(nraw))
                 for ch in (nparsed.get('changes') or []):

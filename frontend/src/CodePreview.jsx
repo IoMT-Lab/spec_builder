@@ -4,15 +4,21 @@ import { diffLines } from 'diff';
 export default function CodePreview({ sessionId, onClose }) {
   const [codeRoot, setCodeRoot] = useState('');
   const [extraPrompt, setExtraPrompt] = useState('');
-  const [job, setJob] = useState(null); // { jobId, fileCount, bytes }
+  const [job, setJob] = useState(null); // { jobId, fileCount, bytes, ignored }
+  const [fileList, setFileList] = useState([]); // [{ path, size }]
+  const [selectedPaths, setSelectedPaths] = useState([]);
   const [proposing, setProposing] = useState(false);
   const [diffs, setDiffs] = useState([]); // [{ path, hunks }]
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+  const [warnings, setWarnings] = useState([]);
 
   const canScan = useMemo(() => Boolean(sessionId && codeRoot.trim()), [sessionId, codeRoot]);
-  const canPropose = useMemo(() => Boolean(job && job.jobId && (job.fileCount || 0) > 0), [job]);
+  const canPropose = useMemo(
+    () => Boolean(sessionId && job?.jobId && selectedPaths.length && !proposing),
+    [sessionId, job, selectedPaths, proposing]
+  );
   const hasDiffs = diffs && diffs.length > 0;
 
   const handleScan = async () => {
@@ -27,11 +33,33 @@ export default function CodePreview({ sessionId, onClose }) {
       });
       const data = await r.json();
       if (!r.ok || data.error) throw new Error(data.error || 'Scan failed');
-      setJob(data);
       const ignoredCount = typeof data.ignored === 'number'
         ? data.ignored
         : (Array.isArray(data.ignored) ? data.ignored.length : 0);
       setInfo(`Scanned ${data.fileCount} files · ${data.bytes} bytes (ignored ${ignoredCount})`);
+      const files = Array.isArray(data.files) ? data.files : [];
+      const recommended = Array.isArray(data.recommended) ? data.recommended.map(String) : [];
+      const augmented = [...files];
+      recommended.forEach(path => {
+        if (!augmented.some(f => f.path === path)) augmented.push({ path, size: null, synthetic: true });
+      });
+      setJob({
+        jobId: data.jobId,
+        fileCount: data.fileCount,
+        bytes: data.bytes,
+        ignored: ignoredCount,
+        recommendedPrompt: data.recommendedPrompt || ''
+      });
+      setWarnings(Array.isArray(data.warnings) ? data.warnings : []);
+      setFileList(augmented);
+      if (recommended.length) {
+        setSelectedPaths(recommended);
+      } else {
+        setSelectedPaths(files.length ? [files[0].path] : []);
+      }
+      if ((data.recommendedPrompt || '').trim()) {
+        setExtraPrompt(prev => prev ? prev : data.recommendedPrompt.trim());
+      }
     } catch (e) {
       setError(e?.message || 'Scan failed');
     }
@@ -39,21 +67,58 @@ export default function CodePreview({ sessionId, onClose }) {
   };
 
   const handlePropose = async () => {
-    if (!job) return;
+    if (!job?.jobId) {
+      setError('Scan code before proposing changes.');
+      return;
+    }
+    if (!selectedPaths.length) {
+      setError('Select at least one file to include.');
+      return;
+    }
     setError('');
     setInfo('Requesting proposal…');
     setProposing(true);
     try {
-      const r = await fetch('/api/code/propose', {
+      const r = await fetch('/api/codegen/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, jobId: job.jobId, extraPrompt })
+        body: JSON.stringify({
+          sessionId,
+          codeRoot,
+          jobId: job.jobId,
+          files: selectedPaths,
+          extraPrompt
+        })
       });
       const data = await r.json();
-      if (!r.ok || data.error) throw new Error(data.error || 'Propose failed');
+      if (!r.ok || data.error) throw new Error(data.error || 'Code generation failed');
+      setJob({
+        jobId: data.jobId,
+        fileCount: data.fileCount,
+        bytes: data.bytes,
+        ignored: data.ignored,
+        recommendedPrompt: data.recommendedPrompt || ''
+      });
+      setWarnings(Array.isArray(data.warnings) ? data.warnings : []);
+      if ((data.recommendedPrompt || '').trim()) {
+        setExtraPrompt(prev => prev ? prev : data.recommendedPrompt.trim());
+      }
+      if (Array.isArray(data.files)) {
+        const files = data.files;
+        const augmented = [...files];
+        const currentSelected = selectedPaths.length ? selectedPaths : [];
+        currentSelected.forEach(path => {
+          if (!augmented.some(f => f.path === path)) augmented.push({ path, size: null, synthetic: true });
+        });
+        setFileList(augmented);
+        setSelectedPaths(prev => {
+          const allowed = augmented.map(f => f.path);
+          const filtered = prev.filter(p => allowed.includes(p));
+          return filtered.length ? filtered : (allowed.length ? [allowed[0]] : []);
+        });
+      }
       setInfo(`Proposed ${data.changes?.length || 0} change(s)`);
-      const d = await fetch(`/api/code/diff/${job.jobId}?ts=${Date.now()}`, { cache: 'no-store' }).then(x => x.json());
-      const mapped = (d.files || []).map(f => ({
+      const mapped = (data.diff || []).map(f => ({
         path: f.path,
         parts: diffLines(f.oldText || '', f.newText || '')
       }));
@@ -65,7 +130,7 @@ export default function CodePreview({ sessionId, onClose }) {
   };
 
   const handleAcceptAll = async () => {
-    if (!job) return;
+    if (!job?.jobId) return;
     setError('');
     setInfo('Applying changes…');
     try {
@@ -81,7 +146,7 @@ export default function CodePreview({ sessionId, onClose }) {
   };
 
   const handleRejectAll = async () => {
-    if (!job) return;
+    if (!job?.jobId) return;
     setError('');
     setInfo('Discarding proposal…');
     try {
@@ -112,6 +177,47 @@ export default function CodePreview({ sessionId, onClose }) {
     );
   };
 
+  const renderWarningsBanner = () => {
+    if (!warnings.length) return null;
+    return (
+      <div style={{
+        background: '#fff7ed',
+        border: '1px solid #d97706',
+        color: '#92400e',
+        padding: '8px 12px',
+        borderRadius: 6,
+        fontSize: 13
+      }}>
+        {warnings.map((w, i) => (
+          <div key={i} style={{ marginBottom: i === warnings.length - 1 ? 0 : 4 }}>
+            ⚠️ {w}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const togglePath = (path) => {
+    setSelectedPaths(prev => (
+      prev.includes(path) ? prev.filter(p => p !== path) : [...prev, path]
+    ));
+  };
+
+  const selectAll = () => {
+    setSelectedPaths(fileList.map(f => f.path));
+  };
+
+  const clearAll = () => {
+    setSelectedPaths([]);
+  };
+
+  const formatSize = (bytes) => {
+    if (typeof bytes !== 'number' || Number.isNaN(bytes)) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 102.4) / 10} KB`;
+    return `${Math.round(bytes / 104857.6) / 10} MB`;
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <section style={{ border: '1px solid #d0d7de', borderRadius: 8, padding: 16, background: '#f9fafb' }}>
@@ -121,6 +227,7 @@ export default function CodePreview({ sessionId, onClose }) {
             Point to the code you want analysed and optionally add instructions before requesting a proposal.
           </p>
         </header>
+        {renderWarningsBanner()}
         <div style={{ display: 'grid', gap: 12 }}>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <span style={{ fontWeight: 600 }}>Code directory path</span>
@@ -141,6 +248,38 @@ export default function CodePreview({ sessionId, onClose }) {
               style={{ minHeight: 100, padding: '8px 10px', border: '1px solid #d0d7de', borderRadius: 6 }}
             />
           </label>
+          {fileList.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontWeight: 600 }}>Files to include ({selectedPaths.length}/{fileList.length})</span>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" onClick={selectAll} style={{ padding: '4px 8px', borderRadius: 4 }}>Select all</button>
+                  <button type="button" onClick={clearAll} style={{ padding: '4px 8px', borderRadius: 4 }}>Clear</button>
+                </div>
+              </div>
+              <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid #d0d7de', borderRadius: 6, padding: 8, background: '#fff' }}>
+                {fileList.map(file => (
+                  <label
+                    key={file.path}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '4px 0' }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedPaths.includes(file.path)}
+                      onChange={() => togglePath(file.path)}
+                    />
+                    <span style={{ flex: 1 }}>{file.path}</span>
+                    {file.size != null && (
+                      <span style={{ color: '#6e7781' }}>{formatSize(file.size)}</span>
+                    )}
+                  </label>
+                ))}
+                {fileList.length === 0 && (
+                  <div style={{ color: '#6e7781', fontSize: 13 }}>No files detected under the selected path.</div>
+                )}
+              </div>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <button
               onClick={handleScan}
@@ -198,7 +337,7 @@ export default function CodePreview({ sessionId, onClose }) {
 
       {!hasDiffs && job && (
         <section style={{ border: '1px dashed #d0d7de', borderRadius: 8, padding: 16, color: '#57606a', background: '#ffffff' }}>
-          No diffs yet. Run <strong>Propose Changes</strong> once the scan is complete to view suggestions here.
+          No diffs yet. Run <strong>Propose Changes</strong> to generate suggestions and review them here.
         </section>
       )}
     </div>

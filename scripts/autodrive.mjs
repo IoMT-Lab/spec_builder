@@ -12,7 +12,13 @@ import process from 'node:process';
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:4000';
 const LLM = process.env.LLM || 'gpt5';
-const ACCEPT_PHRASE = process.env.ACCEPT_PHRASE || 'Looks right, please apply this to the PRD.';
+const DEFAULT_ACCEPT_PHRASE = "Looks good, let's move forward.";
+const ACCEPT_PHRASE = process.env.ACCEPT_PHRASE || DEFAULT_ACCEPT_PHRASE;
+const ENABLE_PRD_AUTOMATION = (() => {
+  const raw = process.env.ENABLE_PRD_AUTOMATION;
+  if (raw == null || raw === '') return true;
+  return /^(1|true)$/i.test(raw);
+})();
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -75,13 +81,16 @@ async function getPRD(id) {
   return r.text();
 }
 
-async function driveFromFile(file, explicitTitle) {
+async function driveFromFile(file, explicitTitle, options = {}) {
+  const { enablePrdAutomation = false } = options;
   const lines = readLines(file);
   if (lines.length === 0) throw new Error('No lines to send');
   const title = explicitTitle || `Scenario ${path.basename(file)} ${new Date().toISOString()}`;
   const session = await createSession(title);
   const id = session.id;
   console.log(`[AUTO] Created session ${id} (${title})`);
+  let prdAutomationNoticeShown = false;
+  let stagnantTurns = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -89,30 +98,49 @@ async function driveFromFile(file, explicitTitle) {
     let resp = await sendLLM(id, line);
     console.log(`[AUTO] LLM: ${String(resp.reply || '').slice(0, 240)}${(resp.reply || '').length > 240 ? '…' : ''}`);
 
-    // Auto-confirm if the server is awaiting confirmation
+    // Auto-confirm if the server is awaiting confirmation (single concise reply)
     let attempts = 0;
     while (resp.session && resp.session.awaitingConfirmation && attempts < 2) {
       attempts++;
+      const confirmMsg = process.env.ACCEPT_PHRASE || 'Confirmed, please proceed with the draft.';
       console.log('[AUTO] Confirming summary to allow drafting…');
-      resp = await sendLLM(id, ACCEPT_PHRASE);
+      resp = await sendLLM(id, confirmMsg);
       console.log(`[AUTO] LLM (post-confirm): ${String(resp.reply || '').slice(0, 200)}${(resp.reply || '').length > 200 ? '…' : ''}`);
     }
 
-    // If a temp PRD exists, accept it
-    const diff = await getDiff(id);
-    if (diff.hasTemp) {
-      console.log('[AUTO] Accepting proposed PRD changes…');
-      try {
-        await acceptTemp(id);
-      } catch (e) {
-        // Fallback to merge if accept is not available
-        console.warn('[AUTO] Accept failed; falling back to merge');
-        await mergeText(id, diff.newText || diff.oldText || '');
+    // Optionally accept PRD updates when automation is enabled
+    if (enablePrdAutomation) {
+      let progressMade = false;
+      const diff = await getDiff(id);
+      if (diff.hasTemp) {
+        const oldText = typeof diff.oldText === 'string' ? diff.oldText.trim() : '';
+        const newText = typeof diff.newText === 'string' ? diff.newText.trim() : '';
+        if (!newText) {
+          console.warn('[AUTO] Temp PRD draft is empty; skipping accept this turn.');
+        } else if (newText === oldText) {
+          console.log('[AUTO] Temp PRD matches accepted PRD; skipping redundant accept.');
+        } else {
+          console.log('[AUTO] Accepting proposed PRD changes…');
+          try {
+            await acceptTemp(id);
+          } catch (e) {
+            console.warn('[AUTO] Accept failed; falling back to merge');
+            await mergeText(id, diff.newText || diff.oldText || '');
+          }
+          progressMade = true;
+          await sleep(150);
+        }
+      } else {
+        console.log('[AUTO] No temp PRD to accept.');
       }
-      // Small pause for filesystem
-      await sleep(150);
-    } else {
-      console.log('[AUTO] No temp PRD to accept.');
+      stagnantTurns = progressMade ? 0 : stagnantTurns + 1;
+      if (stagnantTurns >= 3) {
+        console.log('[AUTO] No PRD changes detected over several turns; stopping early.');
+        break;
+      }
+    } else if (!prdAutomationNoticeShown) {
+      console.log('[AUTO] PRD automation disabled; skipping PRD diff checks.');
+      prdAutomationNoticeShown = true;
     }
   }
 
@@ -126,20 +154,29 @@ async function main() {
   const argv = process.argv.slice(2);
   let file = null;
   let titleFlag = null;
+  let enablePrdAutomation = ENABLE_PRD_AUTOMATION;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--title' && i + 1 < argv.length) {
       titleFlag = argv[++i];
       continue;
     }
+    if (a === '--enable-prd-automation') {
+      enablePrdAutomation = true;
+      continue;
+    }
+    if (a === '--disable-prd-automation') {
+      enablePrdAutomation = false;
+      continue;
+    }
     if (!a.startsWith('-') && !file) file = a;
   }
   if (!file) {
-    console.error('Usage: node scripts/autodrive.mjs [--title "My Run"] <path-to-lines.txt>');
+    console.error('Usage: node scripts/autodrive.mjs [--title "My Run"] [--enable-prd-automation|--disable-prd-automation] <path-to-lines.txt>');
     process.exit(2);
   }
   try {
-    await driveFromFile(file, titleFlag);
+    await driveFromFile(file, titleFlag, { enablePrdAutomation });
   } catch (e) {
     console.error('[AUTO] Error:', e?.message || e);
     process.exit(1);

@@ -1,0 +1,15 @@
+{
+  "changes": [
+    {
+      "path": "tests/generated_tests.c",
+      "action": "add",
+      "new_content": "#include \"unity.h\"\n#include \"app/as7341.h\"\n#include \"globals.h\"\n\nvoid setUp(void) {\n    PD_I2c_Init(get_i2c());\n    PD_Power_On();\n}\n\nvoid tearDown(void) {\n    PD_Power_Off();\n}\n\nvoid test_i2c_initialization(void) {\n    TEST_ASSERT_EQUAL_INT32(HAL_OK, HAL_I2C_IsDeviceReady(get_i2c(), PD_DEVICE_ADDR, 3, 1000));\n}\n\nvoid test_power_on_device(void) {\n    PD_Power_On();\n    TEST_ASSERT_EQUAL_UINT8(1, read_register(0x80));\n}\n\nvoid test_identifiers_check(void) {\n    TEST_ASSERT_TRUE(check_identifiers());\n}\n\nvoid test_led_control(void) {\n    PD_Initialize_LED();\n    PD_LED_On();\n    TEST_ASSERT_EQUAL_UINT8(0b10000100, read_register(0x74));\n    PD_LED_Off();\n    TEST_ASSERT_EQUAL_UINT8(0b00000100, read_register(0x74));\n}\n\nvoid test_measurement_modes(void) {\n    device_initialization(FALSE, 0, 0);\n    TEST_ASSERT_TRUE(PD_Measurement_Enabled());\n    PD_Enable_Interrupt();\n    TEST_ASSERT_TRUE(PD_Interrupt_Enabled());\n\n    // Testing polling mode\n    pulse();\n    TEST_ASSERT_EQUAL_UINT8(0, read_register(0xF9)); // Interrupt registers unset\n\n    // Testing interrupt mode\n    PD_Set_LowThreshold(200);\n    PD_Set_HighThreshold(800);\n    HAL_Delay(1000);\n    TEST_ASSERT_TRUE(PD_Get_LowInterrupt() || PD_Get_HighInterrupt());\n}\n\nint main(void) {\n    UNITY_BEGIN();\n    RUN_TEST(test_i2c_initialization);\n    RUN_TEST(test_power_on_device);\n    RUN_TEST(test_identifiers_check);\n    RUN_TEST(test_led_control);\n    RUN_TEST(test_measurement_modes);\n    return UNITY_END();\n}\n"
+    }
+  ],
+  "notes": "Added unit tests for I2C initialization, LED control, and measurement modes.\nTrimmed 1 file(s) to 40000 chars for token limits.",
+  "truncatedFiles": [
+    "Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_i2c.c"
+  ],
+  "skippedChunks": 0,
+  "extraPrompt": ""
+}

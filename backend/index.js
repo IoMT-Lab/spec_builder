@@ -10,27 +10,23 @@ const runLLMScript = require('./runLLMScript');
 const { PRD_SECTIONS, QUESTION_TEMPLATES } = require('./prdConfig');
 const { createSession, getSession, updateSession } = require('./prdSessionStore');
 
+const keepAlive = setInterval(() => {}, 1000);
+
 const openaiApiKey = process.env.OPENAI_API_KEY;
 const geminiApiKey = process.env.GEMINI_API_KEY;
 const DEFAULT_OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o';
 let ACTIVE_OPENAI_MODEL = DEFAULT_OPENAI_MODEL;
+if (process.env.UI_DEFAULT_LLM && process.env.UI_DEFAULT_LLM.trim()) {
+  ACTIVE_OPENAI_MODEL = process.env.UI_DEFAULT_LLM.trim();
+}
 let OPENAI_PROBE = { ok: false, error: 'not probed yet', tried: [], chosen: null };
 
 const ROOT_DIR = path.join(__dirname, '..');
 const SCRIPTS_DIR = path.join(ROOT_DIR, 'scripts');
 const SCENARIOS_DIR = path.join(ROOT_DIR, 'scenarios');
-const CODE_MAX_FILES_PER_CHUNK = Math.max(parseInt(process.env.CODE_MAX_FILES_PER_CHUNK || '12', 10) || 12, 1);
-const CODE_MAX_CHARS_PER_CHUNK = Math.max(parseInt(process.env.CODE_MAX_CHARS_PER_CHUNK || '60000', 10) || 60000, 2000);
-const CODE_MAX_TOTAL_CHUNKS = Math.max(parseInt(process.env.CODE_MAX_TOTAL_CHUNKS || '12', 10) || 12, 1);
 const CODE_MAX_CHARS_PER_FILE = Math.max(parseInt(process.env.CODE_MAX_CHARS_PER_FILE || '40000', 10) || 40000, 2000);
-const STRICT_TEST_MODE = String(process.env.CODE_TEST_STRICT_MODE || '1').toLowerCase() !== '0';
-const STRICT_REALISM_FEEDBACK = (
-  'Add realistic hardware coverage: simulate driver/HAL error returns, invalid sensor data, and timing faults. ' +
-  'Assert the system reacts correctly, including recovery or safe shutdown paths.'
-);
-const STRICT_KEYWORDS = ['fail', 'error', 'invalid', 'timeout', 'fault', 'recover', 'retry', 'fallback'];
-const ASSERT_KEYWORDS = ['assert', 'expect', 'verify', 'check', 'ASSERT', 'EXPECT'];
-const HARDWARE_KEYWORDS = ['hal_', 'gpio_', 'i2c_', 'spi_', 'adc_', 'uart_', 'dma_', 'register', '0x'];
+const CODE_MAX_SELECTED_FILES = Math.max(parseInt(process.env.CODE_MAX_SELECTED_FILES || '6', 10) || 6, 1);
+const STRICT_TEST_MODE = String(process.env.CODE_TEST_STRICT_MODE || '0').toLowerCase() !== '0';
 const HARDWARE_REGEXES = [
   /\bPD_[A-Za-z0-9_]+\b/,
   /\bHAL_[A-Za-z0-9_]+\b/,
@@ -1143,31 +1139,7 @@ function walkFiles(root) {
   return out;
 }
 
-function chunkFilesForLlm(files = []) {
-  const batches = [];
-  let current = [];
-  let currentChars = 0;
-  for (const f of files) {
-    const content = typeof f.content === 'string' ? f.content : '';
-    const size = content.length;
-    const exceedsCharLimit = currentChars + size > CODE_MAX_CHARS_PER_CHUNK;
-    const exceedsFileLimit = current.length >= CODE_MAX_FILES_PER_CHUNK;
-    if (current.length > 0 && (exceedsCharLimit || exceedsFileLimit)) {
-      batches.push(current);
-      current = [];
-      currentChars = 0;
-    }
-    current.push(f);
-    currentChars += size;
-    if (current.length >= CODE_MAX_FILES_PER_CHUNK || currentChars >= CODE_MAX_CHARS_PER_CHUNK) {
-      batches.push(current);
-      current = [];
-      currentChars = 0;
-    }
-  }
-  if (current.length) batches.push(current);
-  return batches;
-}
+
 
 function summarizeHardwareSignals(files = []) {
   const apiTokens = new Set();
@@ -1210,6 +1182,26 @@ function extractInsightKeywords(insights = '') {
     .split(/\W+/)
     .filter(w => w && w.length >= 4)
     .slice(0, 24);
+}
+
+function buildFallbackPrompt(prdText = '') {
+  const lines = String(prdText || '').split(/\r?\n/);
+  const bullets = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('-') || trimmed.startsWith('*')) {
+      bullets.push(trimmed.replace(/^[-*]\s*/, ''));
+    }
+    if (bullets.length >= 6) break;
+  }
+  const summary = bullets.length
+    ? bullets.join('; ')
+    : lines.filter(l => l.trim()).slice(0, 5).join(' ');
+  return (
+    'Generate realistic hardware-focused automated tests that cover nominal behaviour, ' +
+    'failure paths, timeouts, and misconfiguration scenarios. ' +
+    'Respect the following requirements: ' + summary
+  ).slice(0, 600);
 }
 
 function prioritizeFileContent(content, insightKeywords = []) {
@@ -1268,15 +1260,7 @@ function prioritizeFileContent(content, insightKeywords = []) {
   return combined || content.slice(0, limit);
 }
 
-function isRealisticTestContent(content) {
-  if (typeof content !== 'string' || !content.trim()) return false;
-  const lower = content.toLowerCase();
-  let score = 0;
-  if (ASSERT_KEYWORDS.some(k => lower.includes(k.toLowerCase()))) score += 1;
-  if (STRICT_KEYWORDS.some(k => lower.includes(k))) score += 1;
-  if (HARDWARE_KEYWORDS.some(k => lower.includes(k))) score += 1;
-  return score >= 2;
-}
+
 
 function pickTestTarget(chunkFiles) {
   const counts = new Map();
@@ -1308,298 +1292,485 @@ function pickTestTarget(chunkFiles) {
   return { ...chosen };
 }
 
-// Prepare: scan a folder and create a job manifest
-app.post('/api/code/prepare', (req, res) => {
+function createHttpError(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
+function resolveCodeRoot(codeRoot) {
+  if (!codeRoot) throw createHttpError(400, 'Missing codeRoot');
+  const raw = String(codeRoot);
+  const expanded = raw.replace(/^~(?=$|\/)/, os.homedir());
+  const root = path.resolve(expanded);
+  if (!fs.existsSync(root)) throw createHttpError(400, 'codeRoot does not exist');
   try {
-    const { sessionId, codeRoot } = req.body || {};
-    if (!sessionId || !codeRoot) return res.status(400).json({ error: 'Missing sessionId or codeRoot' });
-    // Expand leading '~' to the user's home dir
-    const raw = String(codeRoot);
-    const expanded = raw.replace(/^~(?=$|\/)/, os.homedir());
-    const root = path.resolve(expanded);
-    if (!fs.existsSync(root)) return res.status(400).json({ error: 'codeRoot does not exist' });
-    try { if (!fs.statSync(root).isDirectory()) return res.status(400).json({ error: 'codeRoot is not a directory' }); } catch {}
-    // Optional allowed roots guard
-    const allowed = (process.env.CODE_ALLOWED_ROOTS || '').split(':').filter(Boolean);
-    if (allowed.length && !allowed.some(a => root.startsWith(path.resolve(a)))) {
-      return res.status(400).json({ error: 'codeRoot not in allowed roots' });
+    if (!fs.statSync(root).isDirectory()) {
+      throw createHttpError(400, 'codeRoot is not a directory');
     }
-    const all = walkFiles(root);
-    // Basic capping: only text-like files, each <= 256KB, at most 500 files or 5MB total
-    const maxFile = 256 * 1024;
-    const maxBytes = 5 * 1024 * 1024;
-    const files = [];
-    let total = 0;
-    for (const f of all) {
-      if (!isTextLike(f.rel)) continue;
-      if (f.size > maxFile) continue;
-      if (files.length >= 500) break;
-      if (total + f.size > maxBytes) break;
-      files.push({ path: f.rel, size: f.size });
-      total += f.size;
-    }
-    const jobId = Date.now().toString();
-    const jobDir = path.join(codeJobsDir, jobId);
-    fs.mkdirSync(jobDir, { recursive: true });
-    const meta = { jobId, sessionId, codeRoot: root, files, bytes: total, createdAt: new Date().toISOString() };
-    fs.writeFileSync(path.join(jobDir, 'job.json'), JSON.stringify(meta, null, 2));
-    res.json({ jobId, fileCount: files.length, bytes: total, ignored: all.length - files.length });
-  } catch (e) {
-    res.status(500).json({ error: e.message || 'prepare failed' });
+  } catch (err) {
+    if (err && err.status) throw err;
+    throw createHttpError(400, 'codeRoot is not a directory');
   }
-});
+  const allowed = (process.env.CODE_ALLOWED_ROOTS || '').split(':').filter(Boolean);
+  if (allowed.length && !allowed.some(a => root.startsWith(path.resolve(a)))) {
+    throw createHttpError(400, 'codeRoot not in allowed roots');
+  }
+  return root;
+}
 
-// Propose: mocked proposal that prepends a PRD note at top of up to 3 files
-app.post('/api/code/propose', async (req, res) => {
+function suggestFilesForTesting(files = []) {
+  const selected = [];
+  const seen = new Set();
+  const pushUnique = (path) => {
+    if (!path || seen.has(path)) return;
+    seen.add(path);
+    selected.push(path);
+  };
+  const testHints = /(test|spec|fixture|unit)/i;
+  const codeExts = new Set(['c','cc','cpp','h','hpp','hh','py','js','jsx','ts','tsx','java','kt','go','rb','rs']);
+  for (const f of files) {
+    const rel = String(f.path || '');
+    if (!rel) continue;
+    const lower = rel.toLowerCase();
+    if (testHints.test(lower)) pushUnique(rel);
+  }
+  if (selected.length < 3) {
+    for (const f of files) {
+      const rel = String(f.path || '');
+      if (!rel) continue;
+      const lower = rel.toLowerCase();
+      const extMatch = /\.([a-z0-9]+)$/.exec(lower);
+      if (extMatch && codeExts.has(extMatch[1])) pushUnique(rel);
+      if (selected.length >= 5) break;
+    }
+  }
+  return selected.slice(0, 5);
+}
+
+
+async function llmSuggestPrompt({ prdText, files, model }) {
   try {
-    const { sessionId, jobId, extraPrompt } = req.body || {};
-    if (!sessionId || !jobId) return res.status(400).json({ error: 'Missing sessionId or jobId' });
-    const jobDir = path.join(codeJobsDir, jobId);
-    const metaPath = path.join(jobDir, 'job.json');
-    if (!fs.existsSync(metaPath)) return res.status(404).json({ error: 'Job not found' });
-    const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
-    const session = getSession(sessionId);
-    if (!session) return res.status(404).json({ error: 'Session not found' });
-    const prdAbsPath = path.join(__dirname, '..', session.prdPath);
-    let prdText = '';
-    try { prdText = fs.readFileSync(prdAbsPath, 'utf-8'); } catch {}
-    const prdInsights = extractPrdHighlights(prdText);
-    const insightKeywords = extractInsightKeywords(prdInsights);
+    const scriptPath = path.join(__dirname, '..', 'llm', 'select_prompt.py');
+    const subset = Array.isArray(files) ? files.slice(0, 250) : [];
+    const result = await runLLMScript(scriptPath, {
+      prd: prdText,
+      files: subset.map(f => ({ path: f.path, size: f.size })),
+      llm: model
+    });
+    if (result && typeof result.prompt === 'string') {
+      return result.prompt.trim();
+    }
+  } catch (err) {
+    console.warn('[CODE PREPARE] select_prompt LLM failed:', err?.message || err);
+  }
+  return '';
+}
+async function llmSelectRelevantFiles({ prdText, files, limit = 12, model }) {
+  try {
+    const scriptPath = path.join(__dirname, '..', 'llm', 'select_files.py');
+    const subset = Array.isArray(files) ? files.slice(0, 250) : [];
+    const result = await runLLMScript(scriptPath, {
+      prd: prdText,
+      files: subset.map(f => ({ path: f.path, size: f.size })),
+      limit,
+      llm: model
+    });
+    if (result && Array.isArray(result.files)) {
+      return result.files.map(p => String(p || '').trim()).filter(Boolean);
+    }
+  } catch (err) {
+    console.warn('[CODE PREPARE] select_files LLM failed:', err?.message || err);
+  }
+  return [];
+}
 
-    // Load file contents according to manifest
-    const filesPayload = [];
-    const truncatedFiles = [];
-    for (const f of meta.files) {
-      const abs = path.join(meta.codeRoot, f.path);
-      let original = '';
+async function prepareCodeJob(sessionId, codeRoot) {
+  if (!sessionId) throw createHttpError(400, 'Missing sessionId');
+  const root = resolveCodeRoot(codeRoot);
+  const all = walkFiles(root);
+  const maxFile = 256 * 1024;
+  const maxBytes = 5 * 1024 * 1024;
+  const files = [];
+  let total = 0;
+  for (const f of all) {
+    if (!isTextLike(f.rel)) continue;
+    if (f.size > maxFile) continue;
+    if (files.length >= 500) break;
+    if (total + f.size > maxBytes) break;
+    files.push({ path: f.rel, size: f.size });
+    total += f.size;
+  }
+  const jobId = Date.now().toString();
+  const jobDir = path.join(codeJobsDir, jobId);
+  fs.mkdirSync(jobDir, { recursive: true });
+  const meta = {
+    jobId,
+    sessionId,
+    codeRoot: root,
+    files,
+    bytes: total,
+    createdAt: new Date().toISOString()
+  };
+  fs.writeFileSync(path.join(jobDir, 'job.json'), JSON.stringify(meta, null, 2));
+  let recommended = [];
+  let recommendedPrompt = '';
+  const warnings = [];
+  const session = getSession(sessionId);
+  const prdText = readPrdText(session);
+  if (prdText) {
+    const llmFiles = await llmSelectRelevantFiles({ prdText, files, model: ACTIVE_OPENAI_MODEL });
+    if (llmFiles.length) {
+      recommended = llmFiles;
+    } else {
+      warnings.push('LLM file selection failed; using fallback recommendations.');
+    }
+    const llmPrompt = await llmSuggestPrompt({ prdText, files, model: ACTIVE_OPENAI_MODEL });
+    if (llmPrompt) {
+      recommendedPrompt = llmPrompt;
+    } else {
+      warnings.push('LLM prompt summarizer failed; using PRD-based fallback prompt.');
+    }
+  }
+  if (!recommended.length) {
+    recommended = suggestFilesForTesting(files);
+  }
+  if (!recommendedPrompt) {
+    recommendedPrompt = buildFallbackPrompt(prdText);
+  }
+  if (!recommended.length) {
+    const defaults = chooseDefaultTarget(files);
+    defaults.forEach(p => { if (!recommended.includes(p)) recommended.push(p); });
+  }
+  const metaPath = path.join(jobDir, 'job.json');
+  try {
+    const metaContents = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+    metaContents.recommended = recommended;
+    metaContents.recommendedPrompt = recommendedPrompt;
+    if (warnings.length) metaContents.warnings = warnings;
+    else delete metaContents.warnings;
+    fs.writeFileSync(metaPath, JSON.stringify(metaContents, null, 2));
+  } catch (err) {
+    console.warn('[CODE PREPARE] Failed to persist recommended metadata:', err?.message || err);
+  }
+  return {
+    jobId,
+    fileCount: files.length,
+    bytes: total,
+    ignored: all.length - files.length,
+    files,
+    recommended,
+    recommendedPrompt,
+    warnings
+  };
+}
+
+function loadJobMeta(jobId) {
+  if (!jobId) throw createHttpError(400, 'Missing jobId');
+  const jobDir = path.join(codeJobsDir, jobId);
+  const metaPath = path.join(jobDir, 'job.json');
+  if (!fs.existsSync(metaPath)) throw createHttpError(404, 'Job not found');
+  const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+  return { meta, jobDir };
+}
+
+function readPrdText(session) {
+  if (!session) throw createHttpError(404, 'Session not found');
+  const prdAbsPath = path.join(__dirname, '..', session.prdPath);
+  try {
+    return fs.readFileSync(prdAbsPath, 'utf-8');
+  } catch {
+    return '';
+  }
+}
+
+function buildLangHint(filesPayload) {
+  const counts = new Map();
+  for (const f of filesPayload) {
+    const m = /\.([a-z0-9]+)$/i.exec(f.path || '');
+    if (m) counts.set(m[1].toLowerCase(), (counts.get(m[1].toLowerCase()) || 0) + 1);
+  }
+  if (!counts.size) return '';
+  const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  const map = {
+    js: 'JavaScript/Jest',
+    jsx: 'JavaScript/Jest',
+    ts: 'TypeScript/Jest',
+    tsx: 'TypeScript/Jest',
+    py: 'Python/pytest',
+    java: 'Java/JUnit',
+    kt: 'Kotlin/JUnit',
+    cs: 'C#/xUnit',
+    rb: 'Ruby/RSpec',
+    go: 'Go/testing',
+    rs: 'Rust/cargo test'
+  };
+  return map[top] || top;
+}
+
+function readJobDiff(jobId) {
+  const { jobDir, meta } = loadJobMeta(jobId);
+  const staging = path.join(jobDir, 'staging');
+  const files = [];
+  const stack = ['.'];
+  while (stack.length) {
+    const rel = stack.pop();
+    const abs = path.join(staging, rel);
+    if (!fs.existsSync(abs)) continue;
+    const st = fs.statSync(abs);
+    if (st.isDirectory()) {
+      for (const it of fs.readdirSync(abs)) stack.push(path.join(rel, it));
+    } else {
+      const newText = fs.readFileSync(abs, 'utf-8');
+      let oldText = '';
+      try {
+        oldText = fs.readFileSync(path.join(meta.codeRoot, rel), 'utf-8');
+      } catch {}
+      files.push({ path: rel.replace(/^\./, ''), oldText, newText });
+    }
+  }
+  return files;
+}
+
+function chooseDefaultTarget(metaFiles = []) {
+  if (!Array.isArray(metaFiles)) metaFiles = [];
+  const heuristics = [
+    f => /test/i.test(String(f.path || '')),
+    f => /\.(c|cc|cpp|py|js|ts|tsx|java|kt|go|rb)$/i.test(String(f.path || ''))
+  ];
+  for (const fn of heuristics) {
+    const hit = metaFiles.find(fn);
+    if (hit) return [hit.path];
+  }
+  for (const target of DEFAULT_TEST_TARGETS) {
+    if (metaFiles.some(f => new RegExp(`\.(${target.exts.join('|')})$`, 'i').test(f.path || ''))) {
+      return [target.path];
+    }
+  }
+  if (DEFAULT_TEST_TARGETS.length) return [DEFAULT_TEST_TARGETS[0].path];
+  if (metaFiles.length) return [metaFiles[0].path];
+  return [];
+}
+
+async function proposeCodeChanges(sessionId, jobId, extraPrompt, selectedPaths = []) {
+  if (!sessionId) throw createHttpError(400, 'Missing sessionId');
+  const timings = [];
+  const startTime = Date.now();
+  let last = startTime;
+  const stamp = (label) => {
+    const now = Date.now();
+    timings.push({ label, ms: now - last });
+    last = now;
+  };
+  const { meta, jobDir } = loadJobMeta(jobId);
+  stamp('load job');
+  const session = getSession(sessionId);
+  if (!session) throw createHttpError(404, 'Session not found');
+  const prdText = readPrdText(session);
+  stamp('read PRD');
+  const prdInsights = extractPrdHighlights(prdText);
+  const insightKeywords = extractInsightKeywords(prdInsights);
+
+  const available = new Map((meta.files || []).map(f => [f.path, f]));
+  let targetPaths = Array.isArray(selectedPaths)
+    ? selectedPaths.map(p => String(p || '').trim()).filter(Boolean)
+    : [];
+  if (!targetPaths.length) targetPaths = chooseDefaultTarget(meta.files || []);
+  if (!targetPaths.length) throw createHttpError(400, 'No files available for generation');
+  if (targetPaths.length > CODE_MAX_SELECTED_FILES) {
+    targetPaths = targetPaths.slice(0, CODE_MAX_SELECTED_FILES);
+  }
+
+  const scriptPath = path.join(__dirname, '..', 'llm', 'code_transform.py');
+  const codeModel = process.env.OPENAI_CODE_MODEL || ACTIVE_OPENAI_MODEL;
+  const strictMode = STRICT_TEST_MODE;
+  const noteLines = [];
+  const aggregatedChanges = [];
+  const truncatedSet = new Set();
+
+  for (let idx = 0; idx < targetPaths.length; idx++) {
+    const relPath = targetPaths[idx];
+    const info = available.get(relPath);
+    let original = '';
+    if (info) {
+      const abs = path.join(meta.codeRoot, relPath);
       try { original = fs.readFileSync(abs, 'utf-8'); } catch {}
-      let content = prioritizeFileContent(original, insightKeywords);
-      if (content.length < original.length) truncatedFiles.push(f.path);
-      if (content.length > CODE_MAX_CHARS_PER_FILE) {
-        truncatedFiles.push(f.path);
-        content = content.slice(0, CODE_MAX_CHARS_PER_FILE);
-      }
-      filesPayload.push({ path: f.path, content });
     }
-
-    const scriptPath = path.join(__dirname, '..', 'llm', 'code_transform.py');
-    const codeModel = process.env.OPENAI_CODE_MODEL || ACTIVE_OPENAI_MODEL;
-    // Simple language hint from extensions
-    const counts = new Map();
-    for (const f of filesPayload) {
-      const m = /\.([a-z0-9]+)$/i.exec(f.path || '');
-      if (m) counts.set(m[1].toLowerCase(), (counts.get(m[1].toLowerCase())||0)+1);
+    let content = original || '';
+    const truncatedPaths = [];
+    if (content.length > CODE_MAX_CHARS_PER_FILE) {
+      content = content.slice(0, CODE_MAX_CHARS_PER_FILE);
+      truncatedPaths.push(relPath);
+      truncatedSet.add(relPath);
     }
-    let langHint = '';
-    if (counts.size) {
-      const top = [...counts.entries()].sort((a,b)=>b[1]-a[1])[0][0];
-      const map = { js:'JavaScript/Jest', jsx:'JavaScript/Jest', ts:'TypeScript/Jest', tsx:'TypeScript/Jest', py:'Python/pytest', java:'Java/JUnit', kt:'Kotlin/JUnit', cs:'C#/xUnit', rb:'Ruby/RSpec', go:'Go/testing', rs:'Rust/cargo test' };
-      langHint = map[top] || top;
-    }
-    const strictMode = STRICT_TEST_MODE;
-    const baseInput = {
+    const spotlight = content ? (prioritizeFileContent(content, insightKeywords) || content) : '';
+    const filesPayload = [{ path: relPath, content: spotlight }];
+    try {
+      console.log('[CODE PROPOSE] model=%s files=%d prdBytes=%d extraBytes=%d target=%s',
+        codeModel, filesPayload.length, prdText.length, String(extraPrompt || '').length, relPath);
+    } catch {}
+    const attemptInput = {
       prd: prdText,
       extraPrompt: String(extraPrompt || ''),
       llm: codeModel,
       limits: { maxChanges: 50, maxTokens: 4000 },
-      langHint
-    };
-    let batches = chunkFilesForLlm(filesPayload);
-    let skippedChunks = 0;
-    if (batches.length > CODE_MAX_TOTAL_CHUNKS) {
-      skippedChunks = batches.length - CODE_MAX_TOTAL_CHUNKS;
-      batches = batches.slice(0, CODE_MAX_TOTAL_CHUNKS);
-    }
-    if (batches.length === 0) {
-      return res.json({ jobId, changes: [], notes: '' });
-    }
-    try {
-      console.log('[CODE PROPOSE] model=%s files=%d batches=%d prdBytes=%d extraBytes=%d', codeModel, filesPayload.length, batches.length, prdText.length, String(extraPrompt||'').length);
-    } catch {}
-
-    const notes = [];
-    const aggregatedTargets = new Map();
-    const truncatedSet = new Set(truncatedFiles);
-
-    for (let i = 0; i < batches.length; i++) {
-      const chunkFiles = batches[i];
-      const target = pickTestTarget(chunkFiles);
-      const targetPath = String(target.path || '').replace(/^\//, '');
-      let targetState = aggregatedTargets.get(targetPath);
-      if (!targetState) {
-        let existingContent = '';
-        let existed = false;
-        try {
-          existingContent = fs.readFileSync(path.join(meta.codeRoot, targetPath), 'utf-8');
-          existed = true;
-        } catch {}
-        targetState = { content: existingContent, existed, dirty: false };
-        aggregatedTargets.set(targetPath, targetState);
-      }
-      const previousContent = targetState.content;
-      const hardwareSummary = summarizeHardwareSignals(chunkFiles);
-      const baseAnalysis = {
-        hardwareSummary,
+      langHint: buildLangHint(filesPayload),
+      files: filesPayload,
+      chunk: { index: idx, total: targetPaths.length },
+      truncatedPaths,
+      analysis: {
+        hardwareSummary: summarizeHardwareSignals(filesPayload),
         prdInsights,
-        strictMode
-      };
-      const attemptNotes = [];
-      const maxAttempts = strictMode ? 2 : 1;
-      let analysisPayload = { ...baseAnalysis, strictRetry: false };
-      let finalContent = null;
-      let strictTriggered = false;
-
-      for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        const chunkInput = {
-          ...baseInput,
-          files: chunkFiles,
-          chunk: { index: i, total: batches.length },
-          truncatedPaths: chunkFiles.filter(f => truncatedSet.has(f.path)).map(f => f.path),
-          testTarget: {
-            path: targetPath,
-            language: target.language,
-            framework: target.framework,
-            instructions: target.instructions,
-            existingContent: targetState.content
-          },
-          analysis: analysisPayload
-        };
-        try {
-          console.log('[CODE PROPOSE] chunk %d/%d (%d files) attempt %d', i + 1, batches.length, chunkFiles.length, attempt + 1);
-        } catch {}
-        const result = await runLLMScript(scriptPath, chunkInput);
-        if (result && result.error) {
-          console.error('[CODE PROPOSE] LLM error (chunk %d/%d attempt %d): %s', i + 1, batches.length, attempt + 1, result.error);
-          if (result.traceback) console.error(result.traceback);
-          return res.status(502).json({ error: result.error, chunk: i, attempt });
-        }
-        if (result && result.notes) attemptNotes.push(String(result.notes));
-        const chunkChanges = Array.isArray(result?.changes) ? result.changes : [];
-        const desiredPath = targetPath;
-        let candidateContent = null;
-        const matchingChange = chunkChanges.find(ch => String(ch.path || '').replace(/^\//, '') === desiredPath && ['add','modify'].includes(String(ch.action || '').toLowerCase()));
-        if (matchingChange && typeof matchingChange.new_content === 'string') {
-          candidateContent = matchingChange.new_content;
-        } else if (!matchingChange && chunkChanges.length) {
-          const fallback = chunkChanges.find(ch => ['add','modify'].includes(String(ch.action || '').toLowerCase()));
-          if (fallback && typeof fallback.new_content === 'string') {
-            console.warn('[CODE PROPOSE] Chunk %d produced unexpected path %s, remapping to %s', i + 1, fallback.path, desiredPath);
-            candidateContent = fallback.new_content;
-          }
-        }
-
-        if (typeof candidateContent === 'string') {
-          if (!strictMode || attempt === maxAttempts - 1 || isRealisticTestContent(candidateContent)) {
-            finalContent = candidateContent;
-            break;
-          }
-          strictTriggered = true;
-          analysisPayload = {
-            ...baseAnalysis,
-            strictRetry: true,
-            strictFeedback: STRICT_REALISM_FEEDBACK
-          };
-          continue;
-        } else {
-          break;
-        }
-      }
-
-      if (attemptNotes.length) notes.push(...attemptNotes);
-      if (strictTriggered && finalContent) {
-        notes.push(`Strict realism enforced for ${targetPath}.`);
-      } else if (strictTriggered && !finalContent) {
-        notes.push(`Strict realism retry produced no additional content for ${targetPath}.`);
-      }
-
-      if (finalContent !== null) {
-        if (finalContent !== previousContent) {
-          targetState.content = finalContent;
-          targetState.dirty = true;
-        } else {
-          targetState.content = finalContent;
-        }
-      }
-      notes.push(`Chunk ${i + 1}: targeted ${targetPath}${strictTriggered ? ' (strict)' : ''}.`);
-    }
-
-    const changes = [];
-    for (const [pathKey, state] of aggregatedTargets.entries()) {
-      const action = state.existed ? 'modify' : 'add';
-      if (!state.dirty && state.existed) continue;
-      changes.push({ path: pathKey, action, new_content: state.content });
-    }
-
-    // Stage changes
-    const staging = path.join(jobDir, 'staging');
-    try { fs.rmSync(staging, { recursive: true, force: true }); } catch {}
-    fs.mkdirSync(staging, { recursive: true });
-    for (const ch of changes) {
-      const rel = String(ch.path || '').replace(/^\//, '');
-      const dst = path.join(staging, rel);
-      const action = String(ch.action || '').toLowerCase();
-      if (action === 'add' || action === 'modify') {
-        const content = String(ch.new_content || '');
-        fs.mkdirSync(path.dirname(dst), { recursive: true });
-        fs.writeFileSync(dst, content, 'utf-8');
-      } else if (action === 'delete') {
-        // mark deletion by creating a tombstone file alongside
-        const mark = dst + '.delete.TOMBSTONE';
-        fs.mkdirSync(path.dirname(mark), { recursive: true });
-        fs.writeFileSync(mark, 'delete', 'utf-8');
-      }
-    }
-    const metaNotes = [];
-    if (truncatedFiles.length) {
-      metaNotes.push(`Trimmed ${truncatedFiles.length} file(s) to ${CODE_MAX_CHARS_PER_FILE} chars for token limits.`);
-    }
-    if (skippedChunks > 0) {
-      metaNotes.push(`Skipped ${skippedChunks} additional chunk(s); refine code root or adjust CODE_MAX_TOTAL_CHUNKS.`);
-    }
-    const combinedNotes = [...notes.filter(Boolean), ...metaNotes].join('\n');
-    const proposalMeta = {
-      changes,
-      notes: combinedNotes,
-      truncatedFiles,
-      skippedChunks
+        strictMode,
+        strictRetry: false
+      },
+      testTarget: pickTestTarget(filesPayload)
     };
-    fs.writeFileSync(path.join(jobDir, 'proposed.json'), JSON.stringify(proposalMeta, null, 2));
-    res.json({ jobId, changes, notes: combinedNotes, truncatedFiles, skippedChunks });
+    const chunkBegin = Date.now();
+    const result = await runLLMScript(scriptPath, attemptInput);
+    timings.push({ label: `llm ${relPath}`, ms: Date.now() - chunkBegin });
+    if (result && result.error) {
+      console.error('[CODE PROPOSE] LLM error:', result.error);
+      if (result.traceback) console.error(result.traceback);
+      throw createHttpError(502, result.error);
+    }
+    const changes = Array.isArray(result?.changes) ? result.changes : [];
+    const note = String(result?.notes || '').trim();
+    if (note) noteLines.push(`[${relPath}] ${note}`);
+    if (!changes.length) {
+      console.warn('[CODE PROPOSE] File %s produced no changes. Raw result: %s', relPath, JSON.stringify(result));
+      continue;
+    }
+    aggregatedChanges.push(...changes);
+  }
+
+  if (!aggregatedChanges.length) {
+    throw createHttpError(502, 'Code model returned no actionable edits for selected files.');
+  }
+
+  const staging = path.join(jobDir, 'staging');
+  try { fs.rmSync(staging, { recursive: true, force: true }); } catch {}
+  fs.mkdirSync(staging, { recursive: true });
+  for (const ch of aggregatedChanges) {
+    const rel = String(ch.path || '').replace(/^\//, '');
+    const dst = path.join(staging, rel);
+    const action = String(ch.action || '').toLowerCase();
+    if (action === 'add' || action === 'modify') {
+      const content = String(ch.new_content || '');
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      fs.writeFileSync(dst, content, 'utf-8');
+    } else if (action === 'delete') {
+      const mark = dst + '.delete.TOMBSTONE';
+      fs.mkdirSync(path.dirname(mark), { recursive: true });
+      fs.writeFileSync(mark, 'delete', 'utf-8');
+    }
+  }
+  stamp('stage writes');
+  const metaNotes = [];
+  if (truncatedSet.size) {
+    metaNotes.push(`Trimmed ${truncatedSet.size} file(s) to ${CODE_MAX_CHARS_PER_FILE} chars for token limits.`);
+  }
+  const combinedNotes = [...noteLines, ...metaNotes].filter(Boolean).join('\n');
+  const proposalMeta = {
+    changes: aggregatedChanges,
+    notes: combinedNotes,
+    truncatedFiles: Array.from(truncatedSet),
+    skippedChunks: 0,
+    extraPrompt: String(extraPrompt || '')
+  };
+  fs.writeFileSync(path.join(jobDir, 'proposed.json'), JSON.stringify(proposalMeta, null, 2));
+  stamp('write metadata');
+  const total = Date.now() - startTime;
+  console.log(`[CODE TIMING] job ${jobId}`, [...timings, { label: 'total', ms: total }]);
+  return { jobId, changes: aggregatedChanges, notes: combinedNotes, truncatedFiles: Array.from(truncatedSet), skippedChunks: 0 };
+}
+
+
+// Prepare: scan a folder and create a job manifest
+app.post('/api/code/prepare', async (req, res) => {
+  try {
+    const { sessionId, codeRoot } = req.body || {};
+    const result = await prepareCodeJob(sessionId, codeRoot);
+    res.json(result);
+  } catch (e) {
+    const status = e?.status || 500;
+    res.status(status).json({ error: e.message || 'prepare failed' });
+  }
+});
+
+app.post('/api/code/propose', async (req, res) => {
+  try {
+    const { sessionId, jobId, extraPrompt, files } = req.body || {};
+    const result = await proposeCodeChanges(sessionId, jobId, extraPrompt, files);
+    res.json(result);
   } catch (e) {
     console.error('[CODE PROPOSE] Failed:', e?.message || e);
     if (e && e.stderr) console.error('[CODE PROPOSE] stderr:', e.stderr);
     if (e && e.stdout) console.error('[CODE PROPOSE] stdout:', e.stdout);
-    res.status(500).json({ error: e.message || 'propose failed' });
+    const status = e?.status || 500;
+    res.status(status).json({ error: e.message || 'propose failed' });
   }
 });
 
 // Diff: return old/new text for each staged file
 app.get('/api/code/diff/:jobId', (req, res) => {
   try {
-    const jobId = req.params.jobId;
-    const jobDir = path.join(codeJobsDir, jobId);
-    const meta = JSON.parse(fs.readFileSync(path.join(jobDir, 'job.json'), 'utf-8'));
-    const staging = path.join(jobDir, 'staging');
-    const files = [];
-    const stack = ['.'];
-    while (stack.length) {
-      const rel = stack.pop();
-      const abs = path.join(staging, rel);
-      if (!fs.existsSync(abs)) continue;
-      const st = fs.statSync(abs);
-      if (st.isDirectory()) {
-        for (const it of fs.readdirSync(abs)) stack.push(path.join(rel, it));
-      } else {
-        const newText = fs.readFileSync(abs, 'utf-8');
-        let oldText = '';
-        try { oldText = fs.readFileSync(path.join(meta.codeRoot, rel), 'utf-8'); } catch {}
-        files.push({ path: rel.replace(/^\./, ''), oldText, newText });
-      }
-    }
+    const files = readJobDiff(req.params.jobId);
     res.set('Cache-Control', 'no-store');
     res.json({ files });
   } catch (e) {
-    res.status(500).json({ error: e.message || 'diff failed' });
+    const status = e?.status || 500;
+    res.status(status).json({ error: e.message || 'diff failed' });
+  }
+});
+
+// One-shot code generation (prepare → propose) without PRD conversation
+app.post('/api/codegen/run', async (req, res) => {
+  try {
+    const { sessionId, codeRoot, jobId, instructions, extraPrompt, files } = req.body || {};
+    const promptPieces = [];
+    if (Array.isArray(instructions)) promptPieces.push(...instructions.map(String));
+    if (extraPrompt) promptPieces.push(String(extraPrompt));
+    const combinedPrompt = promptPieces.join('\n\n').trim();
+
+    let activeJobId = jobId || null;
+    let prepSummary = null;
+    if (activeJobId) {
+      const { meta } = loadJobMeta(activeJobId);
+      prepSummary = {
+        jobId: activeJobId,
+        fileCount: Array.isArray(meta.files) ? meta.files.length : 0,
+        bytes: meta.bytes || 0,
+        ignored: 0,
+        files: meta.files || [],
+        recommendedPrompt: meta.recommendedPrompt || '',
+        warnings: meta.warnings || []
+      };
+    } else {
+      const prep = await prepareCodeJob(sessionId, codeRoot);
+      activeJobId = prep.jobId;
+      prepSummary = prep;
+    }
+
+    const proposal = await proposeCodeChanges(sessionId, activeJobId, combinedPrompt, files);
+    const diffFiles = readJobDiff(activeJobId);
+    res.json({
+      jobId: activeJobId,
+      fileCount: prepSummary.fileCount,
+      bytes: prepSummary.bytes,
+      ignored: prepSummary.ignored,
+      files: prepSummary.files,
+      recommendedPrompt: prepSummary.recommendedPrompt || '',
+      warnings: prepSummary.warnings || [],
+      changes: proposal.changes,
+      notes: proposal.notes,
+      truncatedFiles: proposal.truncatedFiles,
+      skippedChunks: proposal.skippedChunks,
+      diff: diffFiles
+    });
+  } catch (e) {
+    const status = e?.status || 500;
+    res.status(status).json({ error: e.message || 'codegen run failed' });
   }
 });
 

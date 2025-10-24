@@ -1,0 +1,9 @@
+{
+  "changes": [],
+  "notes": "Trimmed 1 file(s) to 40000 chars for token limits.",
+  "truncatedFiles": [
+    "Drivers/STM32WB0x_HAL_Driver/Src/stm32wb0x_hal_i2c.c"
+  ],
+  "skippedChunks": 0,
+  "extraPrompt": "Develop unit tests for the photo detector application using I²C. Ensure tests cover: I²C initialization, verifying auxiliary, revision, and base IDs, and LED control post-validation. Test register read/write with valid and invalid values. In polling mode, check for measurement every 5s, LED pulse, and unset interrupt registers. In interrupt mode, test threshold configurations, trigger verification, and negative testing with invalid thresholds. Handle zero measurements in dark conditions as success. Simulate I²C scenarios, verify interrupt ignorance in polling mode. Ensure 95%+ success and CI integration."
+}
