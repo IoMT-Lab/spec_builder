@@ -4,17 +4,21 @@ const fetch = fetchModule.default || fetchModule;
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
 require('dotenv').config();
 const runLLMScript = require('./runLLMScript');
 const { PRD_SECTIONS, QUESTION_TEMPLATES } = require('./prdConfig');
 const { createSession, getSession, updateSession } = require('./prdSessionStore');
 const demoStore = require('./demoStore');
+const OpenAIImport = require('openai');
+const OpenAI = OpenAIImport?.OpenAI || OpenAIImport?.default || OpenAIImport;
 
 const keepAlive = setInterval(() => {}, 1000);
 
 const openaiApiKey = process.env.OPENAI_API_KEY;
 const geminiApiKey = process.env.GEMINI_API_KEY;
+const openaiClient = (openaiApiKey && OpenAI) ? new OpenAI({ apiKey: openaiApiKey }) : null;
 const DEFAULT_OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o';
 let ACTIVE_OPENAI_MODEL = DEFAULT_OPENAI_MODEL;
 if (process.env.UI_DEFAULT_LLM && process.env.UI_DEFAULT_LLM.trim()) {
@@ -28,6 +32,7 @@ const SCENARIOS_DIR = path.join(ROOT_DIR, 'scenarios');
 const CODE_MAX_CHARS_PER_FILE = Math.max(parseInt(process.env.CODE_MAX_CHARS_PER_FILE || '40000', 10) || 40000, 2000);
 const CODE_MAX_SELECTED_FILES = Math.max(parseInt(process.env.CODE_MAX_SELECTED_FILES || '6', 10) || 6, 1);
 const STRICT_TEST_MODE = String(process.env.CODE_TEST_STRICT_MODE || '0').toLowerCase() !== '0';
+const ENABLE_CODE_VECTOR_SEARCH = String(process.env.CODE_ENABLE_VECTOR_SEARCH || '1').toLowerCase() !== '0';
 const HARDWARE_REGEXES = [
   /\bPD_[A-Za-z0-9_]+\b/,
   /\bHAL_[A-Za-z0-9_]+\b/,
@@ -43,11 +48,21 @@ const HARDWARE_REGEXES = [
 ];
 const DEFAULT_TEST_TARGETS = [
   {
-    exts: ['c', 'h'],
-    path: 'tests/generated_tests.c',
+    exts: ['c','h'],
+    path: 'tests/hw_pd_on_target.c',
+    language: 'c',
+    framework: 'uart_harness',
+    instructions:
+      'On-target integration tests using UART harness. Use PD_* APIs only. Always wait for readiness with timeout; verify IDs before LED; in polling mode sample N times and assert both interrupt flags stay false each sample; in interrupt mode set explicit thresholds, enable interrupts, poll PD_Get_{Low,High}Interrupt with strict timeout, then read only if PD_Get_Valid==TRUE; treat continuous zeros as failure; include an impossible-thresholds negative that never reads.'
+  },
+  {
+    exts: ['c','h'],
+    path: 'tests/host_pd_unit.c',
     language: 'c',
     framework: 'unity',
-    instructions: 'Use Unity-style C tests with setUp/tearDown and TEST_ASSERT macros.'
+    instructions:
+      'Host-only unit tests with Unity/CMock for driver logic (register R/W, error paths, LED sequencing). Do not simulate timing, readiness, or interrupts here.'
+  
   },
   {
     exts: ['cpp', 'cc', 'hpp', 'hh'],
@@ -71,6 +86,110 @@ const DEFAULT_TEST_TARGETS = [
     instructions: 'Use Jest (describe/it) and expect assertions.'
   }
 ];
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function ensureSessionVectorStore(sessionId, session, prdText) {
+  if (!ENABLE_CODE_VECTOR_SEARCH) return null;
+  if (!openaiClient || !openaiApiKey) return null;
+  if (!session || !prdText || !prdText.trim()) return null;
+  const vectorStoresApi = openaiClient.vectorStores || (openaiClient.beta && openaiClient.beta.vectorStores);
+  if (!vectorStoresApi || !vectorStoresApi.create) {
+    console.warn('[VECTOR STORE] Vector store APIs unavailable on client');
+    return null;
+  }
+  const prdRelPath = session.prdPath;
+  const prdAbsPath = path.join(__dirname, '..', prdRelPath);
+  if (!fs.existsSync(prdAbsPath)) return null;
+  const checksum = crypto.createHash('sha256').update(prdText, 'utf8').digest('hex');
+
+  let storeId = session.codeVectorStoreId || null;
+  let fileId = session.codeVectorStoreFileId || null;
+  const priorChecksum = session.codeVectorStoreChecksum || null;
+
+  try {
+    if (!storeId) {
+      const store = await vectorStoresApi.create({
+        name: `session-prd-${sessionId}`,
+        metadata: { sessionId }
+      });
+      storeId = store?.id || null;
+    }
+    if (!storeId) return null;
+
+    const needsUpload = !fileId || priorChecksum !== checksum;
+    let newFileId = fileId;
+    if (needsUpload) {
+      if (fileId) {
+        try {
+          if (vectorStoresApi.files?.delete) {
+            await vectorStoresApi.files.delete(storeId, fileId);
+          }
+        } catch (err) {
+          console.warn('[VECTOR STORE] Failed to detach prior file', fileId, err?.message || err);
+        }
+        try {
+          await openaiClient.files.del(fileId);
+        } catch (err) {
+          /* ignore */
+        }
+      }
+      const createdFile = await openaiClient.files.create({
+        file: fs.createReadStream(prdAbsPath),
+        purpose: 'assistants'
+      });
+      newFileId = createdFile?.id || null;
+      if (newFileId) {
+        if (vectorStoresApi.files?.create) {
+          await vectorStoresApi.files.create(storeId, {
+            file_id: newFileId
+          });
+        }
+        // Poll until processing completes (best-effort)
+        for (let i = 0; i < 10; i++) {
+          try {
+            if (!vectorStoresApi.files?.retrieve) break;
+            const status = await vectorStoresApi.files.retrieve(storeId, newFileId);
+            const state = (status?.status || '').toLowerCase();
+            if (['completed', 'processed', 'ready'].includes(state)) break;
+            if (['failed', 'error'].includes(state)) {
+              console.warn('[VECTOR STORE] File processing failed', state);
+              break;
+            }
+          } catch (err) {
+            const msg = err?.message || '';
+            const status = err?.status || err?.code;
+            if (status === 404 || /no file found/i.test(msg)) {
+              await sleep(500);
+              continue;
+            }
+            console.warn('[VECTOR STORE] Poll error', msg || err);
+            break;
+          }
+          await sleep(500);
+        }
+      }
+    }
+
+    const updates = {};
+    if (storeId && storeId !== session.codeVectorStoreId) {
+      updates.codeVectorStoreId = storeId;
+    }
+    if (newFileId && newFileId !== session.codeVectorStoreFileId) {
+      updates.codeVectorStoreFileId = newFileId;
+    }
+    if (priorChecksum !== checksum) {
+      updates.codeVectorStoreChecksum = checksum;
+    }
+    if (Object.keys(updates).length) {
+      updateSession(sessionId, updates);
+    }
+    return storeId;
+  } catch (err) {
+    console.warn('[VECTOR STORE] Failed to prepare store for session', sessionId, err?.message || err);
+    return storeId || null;
+  }
+}
 
 const app = express();
 app.use(express.json());
@@ -1549,14 +1668,15 @@ function suggestFilesForTesting(files = []) {
 }
 
 
-async function llmSuggestPrompt({ prdText, files, model }) {
+async function llmSuggestPrompt({ prdText, files, model, vectorStoreId }) {
   try {
     const scriptPath = path.join(__dirname, '..', 'llm', 'select_prompt.py');
     const subset = Array.isArray(files) ? files.slice(0, 250) : [];
     const result = await runLLMScript(scriptPath, {
       prd: prdText,
       files: subset.map(f => ({ path: f.path, size: f.size })),
-      llm: model
+      llm: model,
+      vectorStoreId: vectorStoreId || null
     });
     if (result && typeof result.prompt === 'string') {
       return result.prompt.trim();
@@ -1566,7 +1686,7 @@ async function llmSuggestPrompt({ prdText, files, model }) {
   }
   return '';
 }
-async function llmSelectRelevantFiles({ prdText, files, limit = 12, model }) {
+async function llmSelectRelevantFiles({ prdText, files, limit = 12, model, vectorStoreId }) {
   try {
     const scriptPath = path.join(__dirname, '..', 'llm', 'select_files.py');
     const subset = Array.isArray(files) ? files.slice(0, 250) : [];
@@ -1574,7 +1694,8 @@ async function llmSelectRelevantFiles({ prdText, files, limit = 12, model }) {
       prd: prdText,
       files: subset.map(f => ({ path: f.path, size: f.size })),
       limit,
-      llm: model
+      llm: model,
+      vectorStoreId: vectorStoreId || null
     });
     if (result && Array.isArray(result.files)) {
       return result.files.map(p => String(p || '').trim()).filter(Boolean);
@@ -1618,6 +1739,11 @@ async function prepareCodeJob(sessionId, codeRoot) {
   const warnings = [];
   const session = getSession(sessionId);
   const prdText = readPrdText(session);
+  let vectorStoreId = null;
+  if (ENABLE_CODE_VECTOR_SEARCH && prdText) {
+    vectorStoreId = await ensureSessionVectorStore(sessionId, session, prdText);
+    if (vectorStoreId) meta.vectorStoreId = vectorStoreId;
+  }
   if (prdText) {
     const llmFiles = await llmSelectRelevantFiles({ prdText, files, model: ACTIVE_OPENAI_MODEL });
     if (llmFiles.length) {
@@ -1649,6 +1775,7 @@ async function prepareCodeJob(sessionId, codeRoot) {
     metaContents.recommendedPrompt = recommendedPrompt;
     if (warnings.length) metaContents.warnings = warnings;
     else delete metaContents.warnings;
+    if (vectorStoreId) metaContents.vectorStoreId = vectorStoreId;
     fs.writeFileSync(metaPath, JSON.stringify(metaContents, null, 2));
   } catch (err) {
     console.warn('[CODE PREPARE] Failed to persist recommended metadata:', err?.message || err);
@@ -1661,7 +1788,8 @@ async function prepareCodeJob(sessionId, codeRoot) {
     files,
     recommended,
     recommendedPrompt,
-    warnings
+    warnings,
+    vectorStoreId: ENABLE_CODE_VECTOR_SEARCH ? (vectorStoreId || null) : null
   };
 }
 
@@ -1768,6 +1896,21 @@ async function proposeCodeChanges(sessionId, jobId, extraPrompt, selectedPaths =
   if (!session) throw createHttpError(404, 'Session not found');
   const prdText = readPrdText(session);
   stamp('read PRD');
+  let vectorStoreId = meta.vectorStoreId || null;
+  if (prdText) {
+    const ensuredStore = await ensureSessionVectorStore(sessionId, session, prdText);
+    if (ensuredStore) {
+      vectorStoreId = ensuredStore;
+      if (meta.vectorStoreId !== ensuredStore) {
+        meta.vectorStoreId = ensuredStore;
+        try {
+          fs.writeFileSync(path.join(jobDir, 'job.json'), JSON.stringify(meta, null, 2));
+        } catch (err) {
+          console.warn('[CODE PROPOSE] Failed to persist vectorStoreId:', err?.message || err);
+        }
+      }
+    }
+  }
   const prdInsights = extractPrdHighlights(prdText);
   const insightKeywords = extractInsightKeywords(prdInsights);
 
@@ -1782,7 +1925,7 @@ async function proposeCodeChanges(sessionId, jobId, extraPrompt, selectedPaths =
   }
 
   const scriptPath = path.join(__dirname, '..', 'llm', 'code_transform.py');
-  const codeModel = process.env.OPENAI_CODE_MODEL || ACTIVE_OPENAI_MODEL;
+const codeModel = 'gpt-4o';
   const strictMode = STRICT_TEST_MODE;
   const noteLines = [];
   const aggregatedChanges = [];
@@ -1824,7 +1967,8 @@ async function proposeCodeChanges(sessionId, jobId, extraPrompt, selectedPaths =
         strictMode,
         strictRetry: false
       },
-      testTarget: pickTestTarget(filesPayload)
+      testTarget: pickTestTarget(filesPayload),
+      vectorStoreId: ENABLE_CODE_VECTOR_SEARCH ? (vectorStoreId || null) : null
     };
     const chunkBegin = Date.now();
     const result = await runLLMScript(scriptPath, attemptInput);

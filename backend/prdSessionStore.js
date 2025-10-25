@@ -29,6 +29,9 @@ function createSession({ projectDescription, industryDomain = '', projectType = 
     prdPath,
     conversationPath,
     id: sessionId,
+    codeVectorStoreId: null,
+    codeVectorStoreFileId: null,
+    codeVectorStoreChecksum: null,
     // Conversation structure control
     cursor: { sectionIndex: 0, fieldIndex: 0 },
     focusStack: [], // [{ type, topic, turnsLeft, depth }]

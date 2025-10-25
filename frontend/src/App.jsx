@@ -58,6 +58,44 @@ function App() {
   const [prdDiffRefreshKey, setPrdDiffRefreshKey] = useState(0);
   const [markdownRefreshKey, setMarkdownRefreshKey] = useState(0);
   const [hasPendingChanges, setHasPendingChanges] = useState(false);
+  const [isTypingDemoPrompt, setIsTypingDemoPrompt] = useState(false);
+  const typingIntervalRef = useRef(null);
+
+  const cancelDemoTyping = () => {
+    if (typingIntervalRef.current) {
+      clearInterval(typingIntervalRef.current);
+      typingIntervalRef.current = null;
+    }
+    if (isTypingDemoPrompt) setIsTypingDemoPrompt(false);
+  };
+
+  const startTypingDemoPrompt = (text) => {
+    cancelDemoTyping();
+    const promptText = String(text || '');
+    if (!promptText) {
+      setUserInput('');
+      return;
+    }
+    setUserInput('');
+    setIsTypingDemoPrompt(true);
+    let index = 0;
+    const totalChars = Math.max(promptText.length, 1);
+    const delay = Math.min(50, Math.max(15, Math.floor(1000 / totalChars)));
+    typingIntervalRef.current = setInterval(() => {
+      index += 1;
+      setUserInput(promptText.slice(0, index));
+      if (index >= promptText.length) {
+        cancelDemoTyping();
+      }
+    }, delay);
+  };
+
+  useEffect(() => () => {
+    if (typingIntervalRef.current) {
+      clearInterval(typingIntervalRef.current);
+      typingIntervalRef.current = null;
+    }
+  }, []);
 
   // Debug: track when pending-changes flag flips and what the UI will show
   useEffect(() => {
@@ -207,9 +245,10 @@ function App() {
 
   // Send message for current session from input
   const handleSend = async () => {
+    cancelDemoTyping();
     const data = await sendMessage(userInput);
     if (data?.demo && data.demo.breakout === false && data.demo.nextPrompt) {
-      setUserInput(data.demo.nextPrompt);
+      startTypingDemoPrompt(data.demo.nextPrompt);
     } else {
       setUserInput('');
     }
@@ -244,8 +283,10 @@ function App() {
         setPrdDiffRefreshKey(k => k + 1);
       }
       if (data?.demo && data.demo.breakout === false && data.demo.nextPrompt) {
-        setUserInput(data.demo.nextPrompt);
+        setMarkdownRefreshKey(k => k + 1);
+        startTypingDemoPrompt(data.demo.nextPrompt);
       } else {
+        cancelDemoTyping();
         setUserInput('');
       }
       return data;
@@ -255,6 +296,7 @@ function App() {
   };
   const handleNeedsChanges = () => {
     const prefill = awaitingConfirm?.summaryText ? `Not quite. ${awaitingConfirm.summaryText}\n\nUpdate: ` : 'Not quite. ';
+    cancelDemoTyping();
     setUserInput(prefill);
     const inputEl = document.querySelector('.user-input');
     if (inputEl) setTimeout(() => inputEl.focus(), 0);
@@ -416,8 +458,9 @@ function App() {
       setSessions(prev => prev.map(s => s.id === tempId ? serverSession : s));
       setCurrentSession(serverSession);
       if (demoNextPrompt) {
-        setUserInput(demoNextPrompt);
+        startTypingDemoPrompt(demoNextPrompt);
       } else {
+        cancelDemoTyping();
         setUserInput('');
       }
 
@@ -886,7 +929,10 @@ function App() {
               type="text"
               placeholder="User input is typed here"
               value={userInput}
-              onChange={e => setUserInput(e.target.value)}
+              onChange={e => {
+                if (isTypingDemoPrompt) cancelDemoTyping();
+                setUserInput(e.target.value);
+              }}
               onKeyDown={handleInputKeyDown}
               disabled={loading || !currentSession}
             />

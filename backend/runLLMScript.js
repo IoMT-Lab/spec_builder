@@ -13,6 +13,11 @@ function runLLMScript(scriptPath, inputObj) {
     py.stdout.on('data', data => output += data);
     py.stderr.on('data', data => error += data);
     py.on('close', code => {
+      if (error) {
+        try {
+          console.error('[LLM PY STDERR]', error.trim());
+        } catch {}
+      }
       if (code !== 0) {
         // Log both output and error for debugging
         console.error('Python script exited with code', code);

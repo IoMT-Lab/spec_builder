@@ -29,7 +29,14 @@ def _to_responses_input(messages: list) -> list:
     return out
 
 
-def get_llm_response_from_context(messages: list, model_name: str, temperature: float = 0.7, response_format: Optional[dict] = None, max_tokens: Optional[int] = None) -> str:
+def get_llm_response_from_context(
+        messages: list,
+        model_name: str,
+        temperature: float = 0.7,
+        response_format: Optional[dict] = None,
+        max_tokens: Optional[int] = None,
+        tool_resources: Optional[dict] = None,
+        tools: Optional[list] = None) -> str:
     """Call the OpenAI Responses API and return the output text.
 
     Falls back to safe combinations when the model rejects certain params.
@@ -53,6 +60,10 @@ def get_llm_response_from_context(messages: list, model_name: str, temperature: 
     }
     if max_tokens is not None:
         base["max_output_tokens"] = max_tokens
+    if tool_resources:
+        base["tool_resources"] = tool_resources
+    if tools:
+        base["tools"] = tools
 
     def _apply_temperature(kwargs: dict) -> dict:
         if model_name.lower().startswith("gpt-5"):

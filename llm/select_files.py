@@ -32,6 +32,7 @@ def main():
         files = payload.get("files", []) or []
         limit = int(payload.get("limit", 10) or 10)
         limit = max(1, min(limit, 20))
+        vector_store_id = payload.get("vectorStoreId")
 
         manifest_lines = []
         for f in files:
@@ -67,7 +68,19 @@ def main():
         }
 
         model = payload.get("llm") or os.getenv("OPENAI_MODEL") or "gpt-4o"
-        raw = get_llm_response_from_context([system_msg, user_msg], model, temperature=0)
+        tools = None
+        tool_resources = None
+        if vector_store_id:
+            tools = [{'type': 'file_search'}]
+            tool_resources = {'file_search': {'vector_store_ids': [vector_store_id]}}
+
+        raw = get_llm_response_from_context(
+            [system_msg, user_msg],
+            model,
+            temperature=0,
+            tool_resources=tool_resources,
+            tools=tools
+        )
         def extract_json(text: str) -> str:
             if not isinstance(text, str):
                 return "{}"

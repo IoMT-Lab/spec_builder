@@ -39,6 +39,7 @@ def main():
         prd = payload.get('prd', '')
         files = payload.get('files', []) or []
         llm = payload.get('llm') or os.getenv('OPENAI_MODEL') or 'gpt-4o'
+        vector_store_id = payload.get('vectorStoreId')
 
         manifest_lines = []
         for f in files:
@@ -72,7 +73,19 @@ def main():
             )
         }
 
-        raw = get_llm_response_from_context([system_msg, user_msg], llm, temperature=0)
+        tools = None
+        tool_resources = None
+        if vector_store_id:
+            tools = [{'type': 'file_search'}]
+            tool_resources = {'file_search': {'vector_store_ids': [vector_store_id]}}
+
+        raw = get_llm_response_from_context(
+            [system_msg, user_msg],
+            llm,
+            temperature=0,
+            tool_resources=tool_resources,
+            tools=tools
+        )
         if os.getenv('SELECT_PROMPT_DEBUG'):
             print(json.dumps({'raw': raw}), file=sys.stderr)
         json_payload = extract_json(raw)

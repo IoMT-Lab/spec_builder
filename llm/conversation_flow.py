@@ -38,10 +38,7 @@ def main():
         messages = conversation
 
         # --- Add error checks for debugging ---
-        if not prev_prd_draft:
-            print('[ERROR] prev_prd_draft is empty!', file=sys.stderr)
-        if not messages:
-            print('[ERROR] messages (conversation history) is empty!', file=sys.stderr)
+        # Removed noisy stderr logging; empty drafts are expected during non-chat flows (e.g., code scan)
         # Optionally, print the actual values for further debugging
         # print('prev_prd_draft:', prev_prd_draft, file=sys.stderr)
         # print('messages:', json.dumps(messages, ensure_ascii=False), file=sys.stderr)

@@ -62,6 +62,7 @@ def main():
         chunk = data.get('chunk', {}) or {}
         truncated_paths = data.get('truncatedPaths') or []
         analysis = data.get('analysis') or {}
+        vector_store_id = data.get('vectorStoreId') or None
         max_changes = int(limits.get('maxChanges', 50))
         env_max_tokens = os.getenv("CODEGEN_MAX_OUTPUT_TOKENS")
         if env_max_tokens is not None:
@@ -186,14 +187,57 @@ def main():
 
         # First attempt with strict JSON; on parameter validation errors, fall back without response_format
         raw = None
+        tools = None
+        tool_resources = None
+        supports_file_search = bool(vector_store_id)
+        if vector_store_id:
+            tools = [{'type': 'file_search'}]
+            tool_resources = {'file_search': {'vector_store_ids': [vector_store_id]}}
         try:
-            raw = get_llm_response_from_context([system, user], llm, temperature=0.1, response_format={'type':'json_object'}, max_tokens=max_tokens)
+            raw = get_llm_response_from_context(
+                [system, user],
+                llm,
+                temperature=0.1,
+                response_format={'type': 'json_object'},
+                max_tokens=max_tokens,
+                tool_resources=tool_resources,
+                tools=tools
+            )
+        except TypeError as exc:
+            msg = str(exc)
+            if 'tool_resources' in msg or 'tools' in msg:
+                supports_file_search = False
+            raw = None
         except Exception:
             raw = None
-        # If the helper returned a diagnostic string about an API error, fall back without response_format
+        print(json.dumps({'debug_raw': raw, 'chunk': chunk, 'target': files[0].get('path') if files else None}, ensure_ascii=False), file=sys.stderr)
+        sys.stderr.flush()
+        if isinstance(raw, str) and 'unexpected keyword argument' in raw.lower():
+            supports_file_search = False
         if raw is None or (isinstance(raw, str) and ('unexpected keyword argument' in raw.lower() or 'an error occurred while calling the openai api' in raw.lower())):
             # Fallback: some client versions reject response_format; retry without it
-            raw = get_llm_response_from_context([system, user], llm, temperature=0.1, max_tokens=max_tokens)
+            raw = get_llm_response_from_context(
+                [system, user],
+                llm,
+                temperature=0.1,
+                max_tokens=max_tokens,
+                tool_resources=None if not supports_file_search else tool_resources,
+                tools=None if not supports_file_search else tools
+            )
+            print(json.dumps({'debug_raw': raw, 'chunk': chunk, 'target': files[0].get('path') if files else None, 'fallback': True, 'file_search': supports_file_search}, ensure_ascii=False), file=sys.stderr)
+            sys.stderr.flush()
+        if raw is None:
+            msg = {
+                'error': 'LLM returned null response',
+                'chunk': chunk,
+                'truncated': truncated_paths,
+                'tool_resources': None if not supports_file_search else tool_resources,
+                'tools': None if not supports_file_search else tools
+            }
+            print(json.dumps(msg, ensure_ascii=False), file=sys.stderr)
+            sys.stderr.flush()
+            print(json.dumps({'changes': [], 'notes': 'LLM returned empty payload'}))
+            sys.exit(0)
         if DEBUG:
             try:
                 chunk_label = 'N/A'
