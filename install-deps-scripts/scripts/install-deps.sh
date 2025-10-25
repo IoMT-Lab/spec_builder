@@ -41,7 +41,7 @@ install_python_packages() {
 
     log "Installing Python packages (user scope)"
     python3 -m pip install --user --upgrade pip
-    python3 -m pip install --user --upgrade openai
+    python3 -m pip install --user --upgrade "openai>=1.60.0"
 }
 
 npm_install_if_present() {
