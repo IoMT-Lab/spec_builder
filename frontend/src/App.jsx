@@ -34,6 +34,7 @@ function App() {
   const menuBarRef = useRef(null);
   const [menuBarRect, setMenuBarRect] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const chatContainerRef = useRef(null);
 
   const ORDER_KEY = 'session_order_v1';
   const loadOrder = () => {
@@ -109,6 +110,38 @@ function App() {
       typingIntervalRef.current = null;
     }
   }, []);
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      setTimeout(() => {
+        const container = chatContainerRef.current;
+        const startScrollTop = container.scrollTop;
+        const targetScrollTop = container.scrollHeight;
+        const startTime = performance.now();
+        const duration = 800; // 800ms for smoother animation
+        
+        const easeInOutCubic = (t) => {
+          // Smooth ease-in-out curve: slow start, fast middle, slow end
+          return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        };
+        
+        const animateScroll = (currentTime) => {
+          const elapsed = currentTime - startTime;
+          const progress = Math.min(elapsed / duration, 1);
+          const easedProgress = easeInOutCubic(progress);
+          
+          container.scrollTop = startScrollTop + (targetScrollTop - startScrollTop) * easedProgress;
+          
+          if (progress < 1) {
+            requestAnimationFrame(animateScroll);
+          }
+        };
+        
+        requestAnimationFrame(animateScroll);
+      }, 10);
+    }
+  }, [conversation]);
 
   // Debug: track when pending-changes flag flips and what the UI will show
   useEffect(() => {
@@ -828,7 +861,7 @@ function App() {
             <div className="llm-markdown-row">
               <section className="llm-replies">
                 <div className="llm-replies-title">LLM REPLIES</div>
-                <div className="llm-replies-content">
+                <div className="llm-replies-content" ref={chatContainerRef}>
                   {errorMsg && (
                     <div style={{ color: 'red', whiteSpace: 'pre-wrap', marginBottom: 12, fontWeight: 500 }}>
                       {errorMsg}

@@ -295,7 +295,7 @@ input:focus, textarea:focus, select:focus {
   gap: 0;
   width: 900px;
   max-width: 100%;
-  margin: 32px auto 0 auto; /* centered row */
+  margin: 16px auto 0 auto; /* centered row */
   background: none;
 }
 .panel {
@@ -312,9 +312,9 @@ input:focus, textarea:focus, select:focus {
   gap: 18px;
   width: 95%;
   max-width: 900px;
-  margin: 36px auto 0 auto; /* centered row */
+  margin: 24px auto 0 auto; /* centered row */
   align-items: stretch;
-  min-height: 220px;
+  min-height: 180px;
 }
 
 /* ---- Sidebar session list (neon schematic) ---- */
@@ -455,7 +455,7 @@ body.is-dragging, body.is-dragging * { }
 .user-input-bar {
   width: 95%;
   max-width: 900px;
-  margin: 32px auto 0 auto;
+  margin: 16px auto 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -526,7 +526,7 @@ body.is-dragging, body.is-dragging * { }
 
 .top-panel {
   width: 280px;
-  height: 150px;
+  height: 100px;
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -540,8 +540,8 @@ body.is-dragging, body.is-dragging * { }
   font-size: 1.0rem;
   margin-left: 16px;
   cursor: pointer;
-  color: #181818;
-  opacity: 0.38;
+  color: var(--text-secondary);
+  opacity: 0.9;
   display: inline-flex;
   align-items: center;
   transition: color 0.2s, transform 0.2s;
