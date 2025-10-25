@@ -8,6 +8,8 @@ export default function CodePreview({ sessionId, onClose }) {
   const [fileList, setFileList] = useState([]); // [{ path, size }]
   const [selectedPaths, setSelectedPaths] = useState([]);
   const [proposing, setProposing] = useState(false);
+  const [progressPercent, setProgressPercent] = useState(0); // 0-100 for progress bar
+  const [progressCompleting, setProgressCompleting] = useState(false); // true when collapsing
   const [diffs, setDiffs] = useState([]); // [{ path, hunks }]
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -84,6 +86,34 @@ export default function CodePreview({ sessionId, onClose }) {
     setError('');
     setInfo('Requesting proposal…');
     setProposing(true);
+    setProgressPercent(0);
+    setProgressCompleting(false);
+    
+    // Start polling for progress
+    let progressInterval = null;
+    const startProgressPolling = () => {
+      progressInterval = setInterval(async () => {
+        try {
+          const progressRes = await fetch(`/api/codegen/progress/${job.jobId}`);
+          if (progressRes.ok) {
+            const data = await progressRes.json();
+            console.log('[PROGRESS POLL]', data);
+            if (data.total > 0) {
+              // Calculate increment as floor(100 / total), then multiply by processed
+              const incrementPerFile = Math.floor(100 / data.total);
+              const percent = Math.min(data.processed * incrementPerFile, 95);
+              console.log('[PROGRESS CALC] total:', data.total, 'processed:', data.processed, 'incrementPerFile:', incrementPerFile, 'percent:', percent);
+              setProgressPercent(percent);
+            }
+          }
+        } catch (e) {
+          console.error('[PROGRESS POLL ERROR]', e);
+        }
+      }, 300); // Poll every 300ms
+    };
+    
+    startProgressPolling();
+    
     try {
       const r = await fetch('/api/codegen/run', {
         method: 'POST',
@@ -96,8 +126,16 @@ export default function CodePreview({ sessionId, onClose }) {
           extraPrompt
         })
       });
+      
       const data = await r.json();
+      if (progressInterval) clearInterval(progressInterval);
+      
       if (!r.ok || data.error) throw new Error(data.error || 'Code generation failed');
+      
+      // Complete the progress bar
+      setProgressPercent(100);
+      setProgressCompleting(true);
+      
       setJob({
         jobId: data.jobId,
         fileCount: data.fileCount,
@@ -138,9 +176,17 @@ export default function CodePreview({ sessionId, onClose }) {
         setDiffs(mapped);
       }
     } catch (e) {
+      if (progressInterval) clearInterval(progressInterval);
       setError(e?.message || 'Propose failed');
+      setProgressPercent(0);
+      setProgressCompleting(false);
     }
     setProposing(false);
+    // Clear progress bar after a short delay
+    setTimeout(() => {
+      setProgressPercent(0);
+      setProgressCompleting(false);
+    }, 500);
   };
 
   const handleAcceptAll = async () => {
@@ -317,7 +363,7 @@ export default function CodePreview({ sessionId, onClose }) {
               </div>
             </div>
           )}
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', width: '100%' }}>
             <button
               onClick={handleScan}
               disabled={!canScan || loading}
@@ -325,6 +371,7 @@ export default function CodePreview({ sessionId, onClose }) {
             >
               {loading ? 'Scanning…' : 'Scan Code'}
             </button>
+            {loading && <div className="code-preview-spinner" />}
             <button
               onClick={handlePropose}
               disabled={!canPropose || proposing}
@@ -332,6 +379,15 @@ export default function CodePreview({ sessionId, onClose }) {
             >
               {proposing ? 'Proposing…' : 'Propose Changes'}
             </button>
+            {proposing && (
+              <div className="code-progress-bar-container">
+                <div
+                  className={`code-progress-bar-fill ${progressCompleting ? 'completing' : ''}`}
+                  style={{ width: `${Math.min(progressPercent, 100)}%` }}
+                />
+                <span className="code-progress-bar-label">{Math.round(progressPercent)}%</span>
+              </div>
+            )}
           </div>
           {renderStatusBanner()}
         </div>

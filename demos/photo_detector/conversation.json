@@ -14,5 +14,5 @@
   { "role": "user", "content": "I think the PRD is good as is. We can finalize it" },
   { "role": "assistant", "content": "Great. The PRD is finalized with Testing (unit + on-target), Symbol Discovery with a fallback, CI via GitHub Actions (OpenOCD/pyOCD, UART logs, JUnit results), symbol map artifact, acceptance criteria, and risk mitigations.\n\nDo you want me to push a final PRD draft to the repo and designate the sign-off owner and publication path (e.g., docs/PRD/PD_Testing_PRD.md)?" },
   { "role": "user", "content": "Nope, all set. " },
-  { "role": "assistant", "content": "Great—PRD is finalized with Testing (unit + on-target), Symbol Discovery with fallback, CI (OpenOCD/pyOCD, UART logs, JUnit), symbol map artifact, acceptance criteria, and risk mitigations. I can generate the final PRD file (e.g., docs/PRD/PD_Testing_PRD.md) and a short PR description for merge. Want me to proceed with creating those artifacts now?" }
+  { "role": "assistant", "content": "Great—PRD is finalized with Testing (unit + on-target), Symbol Discovery with fallback, CI (OpenOCD/pyOCD, UART logs, JUnit), symbol map artifact, acceptance criteria, and risk mitigations." }
 ]

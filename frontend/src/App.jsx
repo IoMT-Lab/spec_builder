@@ -966,23 +966,25 @@ function App() {
           )}
 
           {/* User Input Bar at Bottom */}
-          <footer className="user-input-bar">
-            <button className="send-btn" onClick={handleSend} disabled={loading || !currentSession}>
-              &#187;&#187;
-            </button>
-            <input
-              className="user-input"
-              type="text"
-              placeholder="User input is typed here"
-              value={userInput}
-              onChange={e => {
-                if (isTypingDemoPrompt) cancelDemoTyping();
-                setUserInput(e.target.value);
-              }}
-              onKeyDown={handleInputKeyDown}
-              disabled={loading || !currentSession}
-            />
-          </footer>
+          {expandedPanel === null && (
+            <footer className="user-input-bar">
+              <button className="send-btn" onClick={handleSend} disabled={loading || !currentSession}>
+                &#187;&#187;
+              </button>
+              <input
+                className="user-input"
+                type="text"
+                placeholder="User input is typed here"
+                value={userInput}
+                onChange={e => {
+                  if (isTypingDemoPrompt) cancelDemoTyping();
+                  setUserInput(e.target.value);
+                }}
+                onKeyDown={handleInputKeyDown}
+                disabled={loading || !currentSession}
+              />
+            </footer>
+          )}
         </div>
       </div>
     </div>

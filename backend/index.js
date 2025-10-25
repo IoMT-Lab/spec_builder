@@ -1892,6 +1892,19 @@ async function proposeCodeChanges(sessionId, jobId, extraPrompt, selectedPaths =
   };
   const { meta, jobDir } = loadJobMeta(jobId);
   stamp('load job');
+  
+  // Setup progress file writer (before calculating targetPaths)
+  const progressPath = path.join(jobDir, 'progress.json');
+  const writeProgress = (processed, total) => {
+    try {
+      const progressData = { jobId, processed, total };
+      fs.writeFileSync(progressPath, JSON.stringify(progressData, null, 2));
+      console.log(`[CODE PROGRESS] Updated: processed=${processed}, total=${total}, file=${progressPath}`);
+    } catch (e) {
+      console.warn('[CODE PROGRESS] Failed to write progress:', e?.message || e);
+    }
+  };
+
   const session = getSession(sessionId);
   if (!session) throw createHttpError(404, 'Session not found');
   const prdText = readPrdText(session);
@@ -1923,6 +1936,12 @@ async function proposeCodeChanges(sessionId, jobId, extraPrompt, selectedPaths =
   if (targetPaths.length > CODE_MAX_SELECTED_FILES) {
     targetPaths = targetPaths.slice(0, CODE_MAX_SELECTED_FILES);
   }
+
+  console.log('[CODE PROPOSE] selectedPaths from frontend:', selectedPaths);
+  console.log('[CODE PROPOSE] targetPaths after processing:', targetPaths, 'count:', targetPaths.length);
+
+  // Initialize progress file with the now-known targetPaths count
+  writeProgress(0, targetPaths.length);
 
   const scriptPath = path.join(__dirname, '..', 'llm', 'code_transform.py');
 const codeModel = 'gpt-4o';
@@ -1970,9 +1989,19 @@ const codeModel = 'gpt-4o';
       testTarget: pickTestTarget(filesPayload),
       vectorStoreId: ENABLE_CODE_VECTOR_SEARCH ? (vectorStoreId || null) : null
     };
+    
+    // Write progress BEFORE starting LLM (file is "in progress")
+    console.log(`[CODE PROPOSE] Starting processing for idx=${idx}, writing progress as "processing"`);
+    writeProgress(idx, targetPaths.length);
+    
     const chunkBegin = Date.now();
     const result = await runLLMScript(scriptPath, attemptInput);
     timings.push({ label: `llm ${relPath}`, ms: Date.now() - chunkBegin });
+    
+    // Write progress AFTER LLM completes (file is "completed")
+    console.log(`[CODE PROPOSE] Completed processing for idx=${idx}, writing progress as "done"`);
+    writeProgress(idx + 1, targetPaths.length);
+    
     if (result && result.error) {
       console.error('[CODE PROPOSE] LLM error:', result.error);
       if (result.traceback) console.error(result.traceback);
@@ -2065,6 +2094,40 @@ app.get('/api/code/diff/:jobId', (req, res) => {
   } catch (e) {
     const status = e?.status || 500;
     res.status(status).json({ error: e.message || 'diff failed' });
+  }
+});
+
+// Get progress of code generation for a job
+app.get('/api/codegen/progress/:jobId', (req, res) => {
+  try {
+    const jobId = req.params.jobId;
+    const jobDir = path.join(codeJobsDir, jobId);
+    const metaPath = path.join(jobDir, 'job.json');
+    const progressPath = path.join(jobDir, 'progress.json');
+    
+    if (!fs.existsSync(metaPath)) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+    
+    const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+    let progress = { processed: 0, total: (meta.files || []).length };
+    
+    if (fs.existsSync(progressPath)) {
+      try {
+        const data = JSON.parse(fs.readFileSync(progressPath, 'utf-8'));
+        progress.processed = data.processed || 0;
+        progress.total = data.total || progress.total;
+        console.log(`[CODE PROGRESS ENDPOINT] Returning progress: processed=${progress.processed}, total=${progress.total}`);
+      } catch (e) {
+        console.warn(`[CODE PROGRESS ENDPOINT] Failed to parse progress.json:`, e?.message || e);
+      }
+    }
+    
+    res.set('Cache-Control', 'no-store');
+    res.json(progress);
+  } catch (e) {
+    const status = e?.status || 500;
+    res.status(status).json({ error: e.message || 'progress check failed' });
   }
 });
 

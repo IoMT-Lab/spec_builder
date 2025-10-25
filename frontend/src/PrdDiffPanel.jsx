@@ -350,7 +350,8 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave, onDiffStateChange }) => {
         </div>
       </div>
 
-      {viewMode === 'split' ? (
+      <div className="prd-diff-content" key={rightLines.join('\n').substring(0, 50)}>
+        {viewMode === 'split' ? (
         <div className="diff-split-view">
           {hunks.map((h, i) => (
             <div key={i} className="diff-hunk">
@@ -393,6 +394,7 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave, onDiffStateChange }) => {
           ))}
         </div>
       )}
+      </div>
 
       <div className="prd-diff-footer">
         <button className="diff-btn diff-btn--ghost" onClick={handleUndo} disabled={!canUndo}>Undo</button>

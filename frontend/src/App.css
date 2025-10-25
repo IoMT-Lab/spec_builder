@@ -866,6 +866,32 @@ body.is-dragging, body.is-dragging * { }
   gap: 18px;
   color: var(--text-primary);
 }
+
+/* Fade-in animation for PRD content */
+@keyframes prdFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes prdTypeIn {
+  from {
+    opacity: 0;
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+.prd-diff-content {
+  animation: prdTypeIn 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
 .prd-diff-panel__header {
   display: flex;
   align-items: center;
@@ -1049,4 +1075,82 @@ body.is-dragging, body.is-dragging * { }
 .diff-unified-view {
   width: 100%;
   min-width: 0;
+}
+
+/* Spinner animation for CodePreview loading states */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.code-preview-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(96, 165, 250, 0.3);
+  border-top-color: #60a5fa;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Progress bar for code generation */
+@keyframes fillProgress {
+  from {
+    transform: scaleX(0);
+    transform-origin: left;
+  }
+  to {
+    transform: scaleX(1);
+    transform-origin: left;
+  }
+}
+
+@keyframes collapseProgress {
+  from {
+    transform: scaleX(1);
+    transform-origin: right;
+  }
+  to {
+    transform: scaleX(0);
+    transform-origin: right;
+  }
+}
+
+.code-progress-bar-container {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  background: rgba(30, 41, 59, 0.65);
+  border: 1px solid rgba(96, 165, 250, 0.25);
+  border-radius: 12px;
+  padding: 0 2px;
+  overflow: hidden;
+  min-width: 120px;
+  flex: 1;
+}
+
+.code-progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(130deg, rgba(96, 165, 250, 0.85), rgba(168, 85, 247, 0.8));
+  border-radius: 10px;
+  flex: 0 0 auto;
+  animation: fillProgress 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  box-shadow: 0 0 12px rgba(96, 165, 250, 0.4);
+}
+
+.code-progress-bar-fill.completing {
+  animation: collapseProgress 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.code-progress-bar-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  padding: 0 8px;
 }
