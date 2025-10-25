@@ -76,11 +76,23 @@ function App() {
       setUserInput('');
       return;
     }
+    
+    // Animation disabled for now - just set text directly
+    setUserInput(promptText);
+    
+    /* Animation code (disabled):
     setUserInput('');
+    
+    // Skip animation for long strings
+    if (promptText.length > 1000) {
+      setUserInput(promptText);
+      return;
+    }
+    
     setIsTypingDemoPrompt(true);
     let index = 0;
     const totalChars = Math.max(promptText.length, 1);
-    const delay = Math.min(50, Math.max(15, Math.floor(1000 / totalChars)));
+    const delay = 5;
     typingIntervalRef.current = setInterval(() => {
       index += 1;
       setUserInput(promptText.slice(0, index));
@@ -88,6 +100,7 @@ function App() {
         cancelDemoTyping();
       }
     }, delay);
+    */
   };
 
   useEffect(() => () => {

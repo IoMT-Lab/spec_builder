@@ -185,6 +185,7 @@ input:focus, textarea:focus, select:focus {
 .sidebar-block--sessions {
   flex: 1;
   min-height: 0;
+  padding-top: 0;
 }
 
 .sidebar-block--sessions .session-list {
@@ -192,6 +193,10 @@ input:focus, textarea:focus, select:focus {
   overflow-y: auto;
   margin: 0;
   padding-right: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
 }
 
 .sidebar-field {
@@ -318,15 +323,13 @@ input:focus, textarea:focus, select:focus {
   align-items: center;
   gap: 8px;
   width: 100%;
-  margin-bottom: 8px;
+  margin-bottom: 0;
 }
 
 .session-list {
   list-style: none;
-  padding: 0;
-  margin: 8px 0 16px 0;
-  display: grid;
-  row-gap: 6px;
+  padding: 8px 0 0 0;
+  margin: 0;
   width: 100%;
 }
 
@@ -339,6 +342,7 @@ input:focus, textarea:focus, select:focus {
   border: 1px solid rgba(148, 163, 184, 0.22);
   background: rgba(17, 24, 39, 0.78);
   border-radius: 12px;
+  min-width: 0;
 }
 
 /* no drag/drop indicators in simplified menu */
@@ -663,9 +667,6 @@ body.is-dragging, body.is-dragging * { }
 }
 
 /* --- Aurora theme overrides for key surfaces --- */
-.session-list {
-  row-gap: 10px;
-}
 .session-list li {
   background: rgba(17, 24, 39, 0.78);
   border: 1px solid rgba(148, 163, 184, 0.22);
