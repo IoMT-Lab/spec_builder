@@ -80,7 +80,21 @@ export default function MarkdownPanel({ sessionId, onSave, refreshKey }) {
           </>
         ) : (
           <>
-            <ReactMarkdown>{markdown}</ReactMarkdown>
+            <ReactMarkdown
+              components={{
+                h1: (props) => <h1 className="prd-h1" {...props} />,
+                h2: (props) => <h2 className="prd-h2" {...props} />,
+                h3: (props) => <h3 className="prd-h3" {...props} />,
+                p: (props) => <p className="prd-p" {...props} />,
+                ul: (props) => <ul className="prd-ul" {...props} />,
+                ol: (props) => <ol className="prd-ol" {...props} />,
+                li: (props) => <li className="prd-li" {...props} />,
+                code: (props) => <code className="prd-code" {...props} />,
+                blockquote: (props) => <blockquote className="prd-quote" {...props} />
+              }}
+            >
+              {markdown}
+            </ReactMarkdown>
             <button style={{ marginTop: 12 }} onClick={() => setEditMode(true)}>Edit PRD</button>
           </>
         )}

@@ -28,6 +28,9 @@ function App() {
   const [infoMsg, setInfoMsg] = useState('');
   const [autodriveRunning, setAutodriveRunning] = useState(false);
   const [autodriveError, setAutodriveError] = useState('');
+  const [availableDemos, setAvailableDemos] = useState([]);
+  const [demoMode, setDemoMode] = useState(false);
+  const [selectedDemo, setSelectedDemo] = useState('');
   const menuBarRef = useRef(null);
   const [menuBarRect, setMenuBarRect] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -70,6 +73,13 @@ function App() {
       const rect = menuBarRef.current.getBoundingClientRect();
       setMenuBarRect({ left: rect.left, width: rect.width });
     }
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/demos')
+      .then(res => res.json())
+      .then(data => setAvailableDemos(Array.isArray(data?.demos) ? data.demos : []))
+      .catch(() => setAvailableDemos([]));
   }, []);
 
   // Fetch sessions from backend
@@ -135,40 +145,50 @@ function App() {
     },
   ];
 
+  const isDemoOnRails = Boolean(currentSession?.demo && currentSession.demo.breakout === false);
+
   // Core send helper to send arbitrary content
   const sendMessage = async (content) => {
-    if (!content.trim() || !currentSession) return;
+    if (!content.trim() || !currentSession) return null;
     setLoading(true);
-    // Call LLM endpoint
-    const res = await fetch('/api/llm', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        input: content,
-        llm: llmProvider,
-        sessionId: currentSession.id
-      })
-    });
-    const data = await res.json();
-    // Subtle toast when no PRD changes were detected
-    if (Object.prototype.hasOwnProperty.call(data, 'hasPrdChanges') && data.hasPrdChanges === false) {
-      setInfoMsg('No PRD changes detected.');
-      setTimeout(() => setInfoMsg(''), 2000);
+    try {
+      const res = await fetch('/api/llm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input: content,
+          llm: llmProvider,
+          sessionId: currentSession.id
+        })
+      });
+      const data = await res.json();
+      if (Object.prototype.hasOwnProperty.call(data, 'hasPrdChanges') && data.hasPrdChanges === false && !(data.demo && data.demo.breakout === false)) {
+        setInfoMsg('No PRD changes detected.');
+        setTimeout(() => setInfoMsg(''), 2000);
+      }
+      setPrdDiffRefreshKey(k => k + 1);
+      const sessionRes = await fetch(`/api/sessions/${currentSession.id}`);
+      const sessionData = await sessionRes.json();
+      setConversation(sessionData.conversation || []);
+      setAwaitingConfirm(sessionData.awaitingConfirmation || null);
+      setCurrentSession(sessionData);
+      if (data?.demo && data.demo.breakout === false) {
+        setHasPendingChanges(false);
+      }
+      return data;
+    } finally {
+      setLoading(false);
     }
-    // Always trigger PRD diff refresh after every LLM response
-    setPrdDiffRefreshKey(k => k + 1);
-    // Re-fetch session to update conversation
-    const sessionRes = await fetch(`/api/sessions/${currentSession.id}`);
-    const sessionData = await sessionRes.json();
-    setConversation(sessionData.conversation || []);
-    setAwaitingConfirm(sessionData.awaitingConfirmation || null);
-    setLoading(false);
   };
 
   // Send message for current session from input
   const handleSend = async () => {
-    await sendMessage(userInput);
-    setUserInput('');
+    const data = await sendMessage(userInput);
+    if (data?.demo && data.demo.breakout === false && data.demo.nextPrompt) {
+      setUserInput(data.demo.nextPrompt);
+    } else {
+      setUserInput('');
+    }
   };
 
   const handleInputKeyDown = (e) => {
@@ -179,7 +199,10 @@ function App() {
 
   // Quick confirm/disagree buttons
   const handleConfirmApply = async () => {
-    await sendMessage('Looks right, please apply this to the PRD.');
+    const data = await sendMessage('Looks right, please apply this to the PRD.');
+    if (data?.demo && data.demo.breakout === false && data.demo.nextPrompt) {
+      setUserInput(data.demo.nextPrompt);
+    }
   };
   const handleNeedsChanges = () => {
     const prefill = awaitingConfirm?.summaryText ? `Not quite. ${awaitingConfirm.summaryText}\n\nUpdate: ` : 'Not quite. ';
@@ -304,6 +327,12 @@ function App() {
         title = `Session ${ts.getFullYear()}-${String(ts.getMonth()+1).padStart(2,'0')}-${String(ts.getDate()).padStart(2,'0')} ${String(ts.getHours()).padStart(2,'0')}:${String(ts.getMinutes()).padStart(2,'0')}`;
       }
 
+      if (demoMode && !selectedDemo) {
+        setErrorMsg('Select a demo before creating a demo session.');
+        setCreatingSession(false);
+        return;
+      }
+
       // Optimistic local add so the UI responds instantly
       const tempId = 'tmp-' + Date.now();
       const tempSession = { id: tempId, title, conversation: [], prdDraft: '', prdPath: '', conversationPath: '' };
@@ -320,14 +349,19 @@ function App() {
       const res = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title }),
+        body: JSON.stringify({ title, demoName: demoMode ? selectedDemo : undefined }),
       });
       if (!res.ok) throw new Error(`Create failed (${res.status})`);
-      const serverSession = await res.json();
+      const { demoNextPrompt, ...serverSession } = await res.json();
 
       // Replace temp with server session
       setSessions(prev => prev.map(s => s.id === tempId ? serverSession : s));
       setCurrentSession(serverSession);
+      if (demoNextPrompt) {
+        setUserInput(demoNextPrompt);
+      } else {
+        setUserInput('');
+      }
 
       // No automatic LLM kickoff; wait for the user's first message
     } catch (err) {
@@ -511,6 +545,34 @@ function App() {
           {apiCheckResult && (
             <div className="api-check-result" style={{ marginTop: 8 }}>{apiCheckResult}</div>
           )}
+          <div className="demo-controls">
+            <label className="demo-toggle">
+              <input
+                type="checkbox"
+                checked={demoMode}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setDemoMode(checked);
+                  if (checked && !selectedDemo && availableDemos.length) {
+                    setSelectedDemo(availableDemos[0].name);
+                  }
+                }}
+              />
+              <span>Demo mode</span>
+            </label>
+            {demoMode && (
+              <select
+                className="demo-select"
+                value={selectedDemo}
+                onChange={(e) => setSelectedDemo(e.target.value)}
+              >
+                {!selectedDemo && <option value="">Select demo…</option>}
+                {availableDemos.map(d => (
+                  <option key={d.name} value={d.name}>{d.title || d.name}</option>
+                ))}
+              </select>
+            )}
+          </div>
           <button
             className="check-api-btn"
             onClick={handleRunAutodrive}
@@ -670,11 +732,11 @@ function App() {
                     );
                   })}
                   {awaitingConfirm && (
-                    <div className="summary-card" style={{ border: '1px solid #ddd', padding: 12, borderRadius: 6, background: '#f9fafb', marginTop: 8 }}>
-                      <div style={{ marginBottom: 8, whiteSpace: 'pre-wrap' }}>{awaitingConfirm.summaryText}</div>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <button onClick={handleConfirmApply} style={{ background: '#e6ffed', border: '1px solid #22863a', color: '#22863a', borderRadius: 3, padding: '6px 12px' }}>Looks right</button>
-                        <button onClick={handleNeedsChanges} style={{ background: '#ffeef0', border: '1px solid #b31d28', color: '#b31d28', borderRadius: 3, padding: '6px 12px' }}>Needs changes</button>
+                    <div className="confirm-bar">
+                      <div className="confirm-bar__text">{awaitingConfirm.summaryText}</div>
+                      <div className="confirm-bar__actions">
+                        <button className="confirm-btn confirm-btn--accept" onClick={handleConfirmApply}>Looks right</button>
+                        <button className="confirm-btn confirm-btn--reject" onClick={handleNeedsChanges}>Needs changes</button>
                       </div>
                     </div>
                   )}
@@ -684,7 +746,7 @@ function App() {
               <div className="markdown-panel">
                 <div className="markdown-panel-content">
                   {/* Single-display rule: show either review (diff) or the main Markdown */}
-                  {currentSession && !String(currentSession.id || '').startsWith('tmp-') && hasPendingChanges ? (
+                  {currentSession && !String(currentSession.id || '').startsWith('tmp-') && hasPendingChanges && !isDemoOnRails ? (
                     <PrdDiffPanel
                       sessionId={currentSession.id}
                       refreshKey={prdDiffRefreshKey}
@@ -693,8 +755,7 @@ function App() {
                     />
                   ) : (
                     <>
-                      {/* Mount a hidden diff panel to detect pending changes without showing it */}
-                      {currentSession && !String(currentSession.id || '').startsWith('tmp-') && (
+                      {currentSession && !String(currentSession.id || '').startsWith('tmp-') && !isDemoOnRails && (
                         <div style={{ display: 'none' }}>
                           <PrdDiffPanel
                             sessionId={currentSession.id}
@@ -703,6 +764,9 @@ function App() {
                             onDiffStateChange={setHasPendingChanges}
                           />
                         </div>
+                      )}
+                      {isDemoOnRails && (
+                        <div className="demo-hint">Demo snapshot applied automatically.</div>
                       )}
                       <MarkdownPanel
                         sessionId={currentSession && !String(currentSession.id || '').startsWith('tmp-') ? currentSession.id : null}

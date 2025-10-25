@@ -306,10 +306,10 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave, onDiffStateChange }) => {
   };
 
   if (loading) {
-    return <div>Loading PRD diff...</div>;
+    return <div className="prd-diff-panel" style={{ padding: 32, fontSize: '0.95rem', color: 'var(--text-secondary)' }}>Loading PRD diff...</div>;
   }
   if (error) {
-    return <div style={{ color: 'red' }}>{error}</div>;
+    return <div className="prd-diff-panel" style={{ padding: 32, color: '#fca5a5' }}>{error}</div>;
   }
   if (!hasTemp) {
     return null;
@@ -321,22 +321,17 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave, onDiffStateChange }) => {
     } catch {}
     return (
       <div className="prd-diff-panel">
-        <h2>Review PRD Changes</h2>
-        <div style={{
-          border: '1px solid #ddd',
-          background: '#fffceb',
-          color: '#6b5900',
-          padding: 12,
-          borderRadius: 6,
-          marginBottom: 12
-        }}>
-          No differences to review right now, but a temp PRD exists. This can occur briefly while the diff recomputes or after accepting all changes. You can finalize to exit review.
+        <div className="prd-diff-panel__header">
+          <h2>Review PRD Changes</h2>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={handleSave} disabled={saving} style={{ padding: '8px 20px', fontWeight: 'bold', background: '#0366d6', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
-            {saving ? 'Saving...' : 'Finalize & Save PRD'}
-          </button>
-          <button onClick={handleRejectAll} style={{ padding: '8px 16px' }}>Reject All</button>
+        <div className="diff-empty-state">
+          <p>No differences to review at the moment. This can happen briefly while the diff recomputes or after accepting all changes.</p>
+          <div className="diff-empty-actions">
+            <button className="diff-btn diff-btn--primary" onClick={handleSave} disabled={saving}>
+              {saving ? 'Saving…' : 'Finalize & Save PRD'}
+            </button>
+            <button className="diff-btn diff-btn--ghost" onClick={handleRejectAll}>Reject All</button>
+          </div>
         </div>
       </div>
     );
@@ -344,41 +339,37 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave, onDiffStateChange }) => {
 
   return (
     <div className="prd-diff-panel">
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <h2>Review PRD Changes</h2>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => setViewMode(v => v === 'split' ? 'unified' : 'split')}>
+      <div className="section-title">Review PRD Changes</div>
+      <div className="prd-diff-panel__header">
+        <div className="prd-diff-panel__actions">
+          <button className="diff-btn diff-btn--ghost" onClick={() => setViewMode(v => v === 'split' ? 'unified' : 'split')}>
             {viewMode === 'split' ? 'Switch to Unified' : 'Switch to Split'}
           </button>
-          <button onClick={handleAcceptAll} title="Accept all proposed changes">Accept All</button>
-          <button onClick={handleRejectAll} title="Reject all proposed changes">Reject All</button>
+          <button className="diff-btn diff-btn--primary" onClick={handleAcceptAll} title="Accept all proposed changes">Accept All</button>
+          <button className="diff-btn diff-btn--danger" onClick={handleRejectAll} title="Reject all proposed changes">Reject All</button>
         </div>
       </div>
 
       {viewMode === 'split' ? (
-        <div className="diff-split-view" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="diff-split-view">
           {hunks.map((h, i) => (
-            <div key={i} style={{ border: '1px solid #ddd', borderRadius: 6, overflow: 'hidden' }}>
-              <div style={{ background: '#f1f8ff', padding: '6px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ fontFamily: 'monospace' }}>{`@@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@`}</div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={() => handleAcceptHunk(i)} style={{ background: '#e6ffed', border: '1px solid #22863a', color: '#22863a', borderRadius: 3 }}>Accept Hunk</button>
-                  <button onClick={() => handleRejectHunk(i)} style={{ background: '#ffeef0', border: '1px solid #b31d28', color: '#b31d28', borderRadius: 3 }}>Reject Hunk</button>
+            <div key={i} className="diff-hunk">
+              <div className="diff-hunk__header">
+                <div className="diff-hunk__meta">{`@@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@`}</div>
+                <div className="diff-hunk__actions">
+                  <button className="diff-btn diff-btn--accept" onClick={() => handleAcceptHunk(i)}>Accept Hunk</button>
+                  <button className="diff-btn diff-btn--reject" onClick={() => handleRejectHunk(i)}>Reject Hunk</button>
                 </div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', fontFamily: 'monospace' }}>
-                <div style={{ padding: 8, borderRight: '1px solid #eee', background: '#fafbfc' }}>
+              <div className="diff-hunk__body">
+                <div className="diff-hunk__col diff-hunk__col--left">
                   {hunkRows(h).map((r, idx) => (
-                    <div key={idx} style={{ background: r.type === 'add' ? 'transparent' : r.type === 'remove' ? '#ffeef0' : r.type === 'modify' ? '#ffeef0' : 'transparent', color: r.type === 'remove' || r.type === 'modify' ? '#b31d28' : '#24292e', whiteSpace: 'pre-wrap' }}>
-                      {r.left}
-                    </div>
+                    <div key={idx} className={`diff-line diff-line--${r.type}`}>{r.left}</div>
                   ))}
                 </div>
-                <div style={{ padding: 8, background: '#fafbfc' }}>
+                <div className="diff-hunk__col diff-hunk__col--right">
                   {hunkRows(h).map((r, idx) => (
-                    <div key={idx} style={{ background: r.type === 'add' ? '#e6ffed' : r.type === 'modify' ? '#e6ffed' : 'transparent', color: r.type === 'add' || r.type === 'modify' ? '#22863a' : '#24292e', whiteSpace: 'pre-wrap' }}>
-                      {r.right}
-                    </div>
+                    <div key={idx} className={`diff-line diff-line--${r.type}`}>{r.right}</div>
                   ))}
                 </div>
               </div>
@@ -387,38 +378,26 @@ const PrdDiffPanel = ({ sessionId, refreshKey, onSave, onDiffStateChange }) => {
         </div>
       ) : (
         <div className="diff-unified-view">
-          <pre style={{ background: '#f7f7f7', padding: 12, borderRadius: 6 }}>
-            {diff.map((d, idx) => {
-              const bg = d.type === 'added' ? '#e6ffed' : d.type === 'removed' ? '#ffeef0' : 'transparent';
-              const textColor = d.type === 'added' ? '#22863a' : d.type === 'removed' ? '#b31d28' : '#24292e';
-              const lineNum = d.type === 'added' ? '+' + d.newLine : d.type === 'removed' ? '-' + d.oldLine : ' ' + d.oldLine;
-              return (
-                <div key={idx} style={{ display: 'flex', alignItems: 'center', background: bg }}>
-                  <span style={{ width: 40, color: '#888', userSelect: 'none' }}>{lineNum}</span>
-                  <span style={{ color: textColor, whiteSpace: 'pre-wrap', flex: 1 }}>{d.value}</span>
-                  {d.type !== 'unchanged' && (
-                    <span style={{ marginLeft: 8 }}>
-                      <button
-                        style={{ marginRight: 4, background: '#e6ffed', border: '1px solid #22863a', color: '#22863a', borderRadius: 3, cursor: 'pointer' }}
-                        onClick={() => handleAccept(idx)}
-                      >Accept</button>
-                      <button
-                        style={{ background: '#ffeef0', border: '1px solid #b31d28', color: '#b31d28', borderRadius: 3, cursor: 'pointer' }}
-                        onClick={() => handleReject(idx)}
-                      >Reject</button>
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </pre>
+          {diff.map((d, idx) => (
+            <div key={idx} className={`diff-row diff-row--${d.type}`}>
+              <span className="diff-row__prefix">{d.type === 'added' ? '+' : d.type === 'removed' ? '−' : ' '}</span>
+              <span className="diff-row__line">{d.type === 'added' ? (d.newLine != null ? `+${d.newLine}` : '') : d.type === 'removed' ? (d.oldLine != null ? `−${d.oldLine}` : '') : (d.newLine ?? d.oldLine ?? '')}</span>
+              <span className="diff-row__content">{d.value || ''}</span>
+              {d.type !== 'unchanged' && (
+                <span className="diff-row__actions">
+                  <button className="diff-btn diff-btn--accept" onClick={() => handleAccept(idx)}>Accept</button>
+                  <button className="diff-btn diff-btn--reject" onClick={() => handleReject(idx)}>Reject</button>
+                </span>
+              )}
+            </div>
+          ))}
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-        <button onClick={handleUndo} disabled={!canUndo} style={{ padding: '8px 16px' }}>Undo</button>
-        <button onClick={handleSave} disabled={saving} style={{ padding: '8px 20px', fontWeight: 'bold', background: '#0366d6', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
-          {saving ? 'Saving...' : 'Finalize & Save PRD'}
+      <div className="prd-diff-footer">
+        <button className="diff-btn diff-btn--ghost" onClick={handleUndo} disabled={!canUndo}>Undo</button>
+        <button className="diff-btn diff-btn--primary" onClick={handleSave} disabled={saving}>
+          {saving ? 'Saving…' : 'Finalize & Save PRD'}
         </button>
       </div>
     </div>

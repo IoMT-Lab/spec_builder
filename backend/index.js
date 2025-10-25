@@ -9,6 +9,7 @@ require('dotenv').config();
 const runLLMScript = require('./runLLMScript');
 const { PRD_SECTIONS, QUESTION_TEMPLATES } = require('./prdConfig');
 const { createSession, getSession, updateSession } = require('./prdSessionStore');
+const demoStore = require('./demoStore');
 
 const keepAlive = setInterval(() => {}, 1000);
 
@@ -191,6 +192,10 @@ function detectDisagree(text = '') {
   return /(no|not quite|disagree|change|adjust|revise|that's wrong|thats wrong|needs changes|edit|modify)/.test(t);
 }
 
+function normalizeDemoInput(str) {
+  return String(str || '').trim().replace(/\s+/g, ' ');
+}
+
 function notesKey(si, fi) { return `${si}:${fi}`; }
 
 function addFactsToNotes(session, si, fi, facts = []) {
@@ -361,6 +366,15 @@ app.get('/api/health', async (req, res) => {
   res.json({ ok, env, openai, python, activeModel: openai.model || null });
 });
 
+app.get('/api/demos', (req, res) => {
+  try {
+    res.json({ demos: demoStore.listDemos() });
+  } catch (err) {
+    console.error('Failed to list demos:', err);
+    res.status(500).json({ error: 'Failed to list demos' });
+  }
+});
+
 // LLM API endpoint (stateful, session-based)
 app.post('/api/llm', async (req, res) => {
   console.log('POST /api/llm called with body:', req.body);
@@ -424,6 +438,63 @@ app.post('/api/llm', async (req, res) => {
       session.awaitingConfirmation = awaiting;
     }
 
+    const prdAbsPath = path.join(__dirname, '..', session.prdPath);
+    const conversationAbsPath = path.join(__dirname, '..', session.conversationPath);
+
+    if (session.demo && session.demo.name && !session.demo.breakout) {
+      const demo = demoStore.getDemo(session.demo.name);
+      if (!demo) {
+        session.demo.breakout = true;
+        console.warn('[DEMO] Demo data missing; falling back to live LLM.');
+      } else {
+        const step = Number(session.demo.step || 0);
+        const normalizedInput = normalizeDemoInput(userInput);
+        const expected = demo.conversation[step];
+        if (expected && expected.role === 'user' && normalizeDemoInput(expected.content) === normalizedInput) {
+          let currentPrd = acceptedPrd;
+          if (demo.snapshots[step + 1]) {
+            currentPrd = demo.snapshots[step + 1];
+            fs.writeFileSync(prdAbsPath, currentPrd);
+          }
+          session.demo.step = step + 1;
+          const replies = [];
+          while (session.demo.step < demo.conversation.length) {
+            const entry = demo.conversation[session.demo.step];
+            if (entry.role !== 'assistant') break;
+            replies.push(entry.content);
+            session.conversation.push({ role: 'assistant', content: entry.content });
+            session.demo.step += 1;
+            if (demo.snapshots[session.demo.step]) {
+              currentPrd = demo.snapshots[session.demo.step];
+              fs.writeFileSync(prdAbsPath, currentPrd);
+            }
+          }
+          const replyText = replies.length ? replies.join('\n\n') : '';
+          let nextDemoPrompt = null;
+          if (session.demo.step < demo.conversation.length) {
+            const nextEntry = demo.conversation[session.demo.step];
+            if (nextEntry.role === 'user') {
+              nextDemoPrompt = nextEntry.content;
+            }
+          }
+          try { if (fs.existsSync(tempPathExisting)) fs.unlinkSync(tempPathExisting); } catch {}
+          const conversationMarkdown = generateConversationMarkdown(session);
+          fs.writeFileSync(conversationAbsPath, conversationMarkdown);
+          updateSession(sessionId, session);
+          return res.json({
+            reply: replyText,
+            prdDraft: null,
+            session,
+            hasPrdChanges: false,
+            demo: { breakout: false, nextPrompt: nextDemoPrompt }
+          });
+        } else {
+          session.demo.breakout = true;
+          console.log('[DEMO] Input did not match scripted step; switching to live mode.');
+        }
+      }
+    }
+
     // Build structure guidance system message (ephemeral)
     const agenda = PRD_SECTIONS.map(s => ({ name: s.name, fields: s.fields }));
     const structureMsg = buildStructureSystemMessage({ agenda, nextFocus, cursor: session.cursor, focusStack: session.focusStack });
@@ -441,7 +512,7 @@ app.post('/api/llm', async (req, res) => {
       // Anchor proposals to the accepted PRD on disk
       prdDraft: acceptedPrd || '',
       // Draft only after explicit confirmation, and never while a review is pending
-      shouldDraft: Boolean(!hasPendingTemp && awaiting && isConfirm),
+      shouldDraft: Boolean(!hasPendingTemp && (!awaiting || isConfirm)),
       // Lower temperature for PRD drafting to reduce arbitrary domain jumps
       temps: { reply: 0.6, draft: 0.2 },
       structure: {
@@ -599,7 +670,23 @@ app.post('/api/llm', async (req, res) => {
       factsCount: Array.isArray(extractedFacts) ? extractedFacts.length : 0,
       awaitingConfirmation: Boolean(session.awaitingConfirmation),
     };
-    return res.json({ reply: scriptResult.reply, prdDraft: scriptResult.prdDraft, session, hasPrdChanges, diagnostics });
+    let demoPayload = null;
+    if (session.demo && session.demo.name) {
+      demoPayload = {
+        name: session.demo.name,
+        breakout: Boolean(session.demo.breakout)
+      };
+      if (!session.demo.breakout) {
+        const demo = demoStore.getDemo(session.demo.name);
+        if (demo && session.demo.step < demo.conversation.length) {
+          const nextEntry = demo.conversation[session.demo.step];
+          if (nextEntry && nextEntry.role === 'user') {
+            demoPayload.nextPrompt = nextEntry.content;
+          }
+        }
+      }
+    }
+    return res.json({ reply: scriptResult.reply, prdDraft: scriptResult.prdDraft, session, hasPrdChanges, diagnostics, demo: demoPayload });
   } catch (error) {
     return res.status(500).json({ error: 'LLM script error', details: error });
   }
@@ -676,33 +763,75 @@ app.get('/api/sessions', (req, res) => {
 // Create a new session
 app.post('/api/sessions', (req, res) => {
   console.log('POST /api/sessions called with body:', req.body);
-  const { title } = req.body;
+  const { title, demoName } = req.body || {};
   const id = Date.now().toString();
   const prdPath = path.join('Documents', `PRD_${id}.md`);
   const conversationPath = path.join('Documents', `CONVO_${id}.md`);
-  const initialAssistantMsg = {
-    role: 'assistant',
-    content: 'Welcome! Please provide a brief description of your project.'
-  };
+  const prdAbsPath = path.join(__dirname, '..', prdPath);
+  const conversationAbsPath = path.join(__dirname, '..', conversationPath);
   const session = {
     id,
     title: title || `Session ${id}`,
-    conversation: [initialAssistantMsg],
+    conversation: [],
     prdDraft: '',
     prdPath,
     conversationPath,
-    state: 'awaiting_project_description' // Ensure state is set for new sessions
+    state: 'awaiting_project_description',
+    demo: null,
   };
-  // Write session file and fsync to ensure it is flushed to disk
+
+  let prdContent = `# PRD for ${session.title}\n`;
+  let nextDemoPrompt = null;
+
+  if (demoName) {
+    const demo = demoStore.getDemo(demoName);
+    if (!demo) {
+      return res.status(400).json({ error: `Demo "${demoName}" not found` });
+    }
+    session.demo = { name: demoName, step: 0, breakout: false };
+    if (demo.snapshots.length > 0) {
+      prdContent = demo.snapshots[0];
+    }
+
+    // Auto-play any leading assistant messages
+    while (session.demo.step < demo.conversation.length) {
+      const entry = demo.conversation[session.demo.step];
+      if (entry.role !== 'assistant') break;
+      session.conversation.push({ role: 'assistant', content: entry.content });
+      session.demo.step += 1;
+      if (demo.snapshots[session.demo.step]) {
+        prdContent = demo.snapshots[session.demo.step];
+      }
+    }
+
+    if (session.demo.step < demo.conversation.length) {
+      const nextEntry = demo.conversation[session.demo.step];
+      if (nextEntry.role === 'user') {
+        nextDemoPrompt = nextEntry.content;
+      }
+    }
+  } else {
+    const initialAssistantMsg = {
+      role: 'assistant',
+      content: 'Welcome! Please provide a brief description of your project.'
+    };
+    session.conversation.push(initialAssistantMsg);
+  }
+
+  if (!fs.existsSync(path.dirname(prdAbsPath))) fs.mkdirSync(path.dirname(prdAbsPath), { recursive: true });
+  fs.writeFileSync(prdAbsPath, prdContent);
+  const conversationMarkdown = generateConversationMarkdown(session);
+  fs.writeFileSync(conversationAbsPath, conversationMarkdown);
+
+  // Persist session file
   const sessionFilePath = path.join(sessionsDir, `${id}.json`);
   const fd = fs.openSync(sessionFilePath, 'w');
   fs.writeSync(fd, JSON.stringify(session, null, 2));
   fs.fsyncSync(fd);
   fs.closeSync(fd);
-  fs.writeFileSync(path.join(__dirname, '..', prdPath), `# PRD for ${session.title}\n`);
-  fs.writeFileSync(path.join(__dirname, '..', conversationPath), `# Conversation History for ${session.title}\n`);
-  console.log('Session created with id:', session.id);
-  res.status(201).json(session);
+
+  console.log('Session created with id:', session.id, 'demo=', session.demo?.name || null);
+  res.status(201).json({ ...session, demoNextPrompt: nextDemoPrompt });
 });
 
 // Get a session by ID
