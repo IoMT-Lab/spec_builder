@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
+      '/api/demos': 'http://localhost:4000',
       '/api/llm': 'http://localhost:4000',
       '/api/health': 'http://localhost:4000',
       '/api/markdown': 'http://localhost:4000',

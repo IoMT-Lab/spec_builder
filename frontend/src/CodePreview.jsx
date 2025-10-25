@@ -13,6 +13,8 @@ export default function CodePreview({ sessionId, onClose }) {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [warnings, setWarnings] = useState([]);
+  const [heldPrd, setHeldPrd] = useState(false);
+  const [flushedPendingFlag, setFlushedPendingFlag] = useState(false);
 
   const canScan = useMemo(() => Boolean(sessionId && codeRoot.trim()), [sessionId, codeRoot]);
   const canPropose = useMemo(
@@ -20,6 +22,7 @@ export default function CodePreview({ sessionId, onClose }) {
     [sessionId, job, selectedPaths, proposing]
   );
   const hasDiffs = diffs && diffs.length > 0;
+  const visibleDiffs = hasDiffs && !heldPrd;
 
   const handleScan = async () => {
     setError('');
@@ -52,6 +55,9 @@ export default function CodePreview({ sessionId, onClose }) {
       });
       setWarnings(Array.isArray(data.warnings) ? data.warnings : []);
       setFileList(augmented);
+      // clear any previous held/flushed flags when scanning anew
+      setHeldPrd(false);
+      setFlushedPendingFlag(false);
       if (recommended.length) {
         setSelectedPaths(recommended);
       } else {
@@ -117,12 +123,20 @@ export default function CodePreview({ sessionId, onClose }) {
           return filtered.length ? filtered : (allowed.length ? [allowed[0]] : []);
         });
       }
-      setInfo(`Proposed ${data.changes?.length || 0} change(s)`);
-      const mapped = (data.diff || []).map(f => ({
-        path: f.path,
-        parts: diffLines(f.oldText || '', f.newText || '')
-      }));
-      setDiffs(mapped);
+      // Respect backend hints about held or flushed drafts
+      setHeldPrd(Boolean(data.heldPrd));
+      setFlushedPendingFlag(Boolean(data.flushedPending));
+      if (data.heldPrd) {
+        setInfo('A draft was generated but held pending your confirmation. Confirm the summary to reveal the PRD diff.');
+        setDiffs([]);
+      } else {
+        setInfo(`Proposed ${data.changes?.length || 0} change(s)`);
+        const mapped = (data.diff || []).map(f => ({
+          path: f.path,
+          parts: diffLines(f.oldText || '', f.newText || '')
+        }));
+        setDiffs(mapped);
+      }
     } catch (e) {
       setError(e?.message || 'Propose failed');
     }
@@ -139,6 +153,8 @@ export default function CodePreview({ sessionId, onClose }) {
       if (!r.ok || data.error) throw new Error(data.error || 'Apply failed');
       setInfo('Applied changes.');
       setDiffs([]);
+      setHeldPrd(false);
+      setFlushedPendingFlag(false);
       if (typeof onClose === 'function') onClose();
     } catch (e) {
       setError(e?.message || 'Apply failed');
@@ -153,6 +169,8 @@ export default function CodePreview({ sessionId, onClose }) {
       await fetch(`/api/code/reject/${job.jobId}`, { method: 'POST' });
       setInfo('Discarded proposal.');
       setDiffs([]);
+      setHeldPrd(false);
+      setFlushedPendingFlag(false);
     } catch (e) {
       setError(e?.message || 'Discard failed');
     }
@@ -175,6 +193,25 @@ export default function CodePreview({ sessionId, onClose }) {
         {message}
       </div>
     );
+  };
+
+  const renderHeldBanner = () => {
+    if (!heldPrd && !flushedPendingFlag) return null;
+    if (heldPrd) {
+      return (
+        <div style={{ background: '#fff7ed', border: '1px solid #d97706', color: '#92400e', padding: 10, borderRadius: 6 }}>
+          A draft was generated but held pending your confirmation. Confirm the summary in chat to reveal the PRD diff.
+        </div>
+      );
+    }
+    if (flushedPendingFlag) {
+      return (
+        <div style={{ background: '#e6ffed', border: '1px solid #22863a', color: '#1c5322', padding: 10, borderRadius: 6 }}>
+          Previously held draft has been flushed to a temp PRD and is available for review.
+        </div>
+      );
+    }
+    return null;
   };
 
   const renderWarningsBanner = () => {
@@ -300,7 +337,7 @@ export default function CodePreview({ sessionId, onClose }) {
         </div>
       </section>
 
-      {hasDiffs && (
+      {visibleDiffs && (
         <section style={{ border: '1px solid #d0d7de', borderRadius: 8, background: '#ffffff', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <header style={{ padding: '12px 16px', borderBottom: '1px solid #d0d7de', background: '#f6f8fa' }}>
             <h3 style={{ margin: 0, fontSize: 16 }}>Proposed Changes</h3>
@@ -308,6 +345,7 @@ export default function CodePreview({ sessionId, onClose }) {
               Review the suggested edits below. Accepting will apply all changes to disk.
             </p>
           </header>
+          <div style={{ padding: 12 }}>{renderHeldBanner()}</div>
           <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 320, overflowY: 'auto' }}>
             {diffs.map((f, i) => (
               <div key={i} style={{ border: '1px solid #d8dee4', borderRadius: 6 }}>

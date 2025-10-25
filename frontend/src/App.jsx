@@ -75,12 +75,35 @@ function App() {
     }
   }, []);
 
+  // Centralized fetch for demos so we can reuse on mount and when toggling demo mode
+  const fetchDemos = async () => {
+    try {
+      const res = await fetch('/api/demos');
+      const data = await res.json();
+      setAvailableDemos(Array.isArray(data?.demos) ? data.demos : []);
+    } catch {
+      setAvailableDemos([]);
+    }
+  };
+
+  // Initial load
   useEffect(() => {
-    fetch('/api/demos')
-      .then(res => res.json())
-      .then(data => setAvailableDemos(Array.isArray(data?.demos) ? data.demos : []))
-      .catch(() => setAvailableDemos([]));
+    fetchDemos();
   }, []);
+
+  // When demo mode is turned on, ensure we have the latest demos
+  useEffect(() => {
+    if (demoMode && availableDemos.length === 0) {
+      fetchDemos();
+    }
+  }, [demoMode]);
+
+  // Auto-select the first demo once the list is available and demo mode is on
+  useEffect(() => {
+    if (demoMode && !selectedDemo && availableDemos.length > 0) {
+      setSelectedDemo(availableDemos[0].name);
+    }
+  }, [availableDemos, demoMode]);
 
   // Fetch sessions from backend
   const fetchSessions = async () => {
@@ -199,9 +222,34 @@ function App() {
 
   // Quick confirm/disagree buttons
   const handleConfirmApply = async () => {
-    const data = await sendMessage('Looks right, please apply this to the PRD.');
-    if (data?.demo && data.demo.breakout === false && data.demo.nextPrompt) {
-      setUserInput(data.demo.nextPrompt);
+    // Use structured confirm to avoid relying on text matching
+    if (!currentSession) return;
+    setLoading(true);
+    try {
+      const res = await fetch('/api/llm', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: currentSession.id, confirm: true })
+      });
+      const data = await res.json();
+      // Refresh session state and conversation
+      const sessionRes = await fetch(`/api/sessions/${currentSession.id}`);
+      const sessionData = await sessionRes.json();
+      setConversation(sessionData.conversation || []);
+      setAwaitingConfirm(sessionData.awaitingConfirmation || null);
+      setCurrentSession(sessionData);
+      // If backend flushed a pending draft, reflect that in UI (hasPendingChanges or banners)
+      if (data?.flushedPending) {
+        setInfoMsg('Pending draft flushed to temp PRD and is available for review.');
+        setPrdDiffRefreshKey(k => k + 1);
+      }
+      if (data?.demo && data.demo.breakout === false && data.demo.nextPrompt) {
+        setUserInput(data.demo.nextPrompt);
+      } else {
+        setUserInput('');
+      }
+      return data;
+    } finally {
+      setLoading(false);
     }
   };
   const handleNeedsChanges = () => {
@@ -561,16 +609,34 @@ function App() {
               <span>Demo mode</span>
             </label>
             {demoMode && (
-              <select
-                className="demo-select"
-                value={selectedDemo}
-                onChange={(e) => setSelectedDemo(e.target.value)}
-              >
-                {!selectedDemo && <option value="">Select demo…</option>}
-                {availableDemos.map(d => (
-                  <option key={d.name} value={d.name}>{d.title || d.name}</option>
-                ))}
-              </select>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <select
+                  className="demo-select"
+                  value={selectedDemo}
+                  onChange={(e) => setSelectedDemo(e.target.value)}
+                  onFocus={() => fetchDemos()}
+                >
+                  {!selectedDemo && <option value="">Select demo…</option>}
+                  {availableDemos.length === 0 && (
+                    <option value="" disabled>(No demos found)</option>
+                  )}
+                  {availableDemos.map(d => (
+                    <option key={d.name} value={d.name}>{d.title || d.name}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="check-api-btn"
+                  style={{ marginLeft: 0, marginTop: 0 }}
+                  title="Refresh list"
+                  onClick={async () => {
+                    await fetchDemos();
+                    if (!selectedDemo && availableDemos.length > 0) {
+                      setSelectedDemo(availableDemos[0].name);
+                    }
+                  }}
+                >Refresh</button>
+              </div>
             )}
           </div>
           <button

@@ -383,7 +383,9 @@ app.post('/api/llm', async (req, res) => {
   // Map provider aliases to concrete model IDs
   if (!llm || llm === 'openai' || llm === 'gpt5' || llm === 'gpt-5') llm = ACTIVE_OPENAI_MODEL;
   if (llm === 'gemini') llm = 'gemini-pro';
-  const userInput = req.body.input || '';
+  const userInput = typeof req.body.input === 'string' ? req.body.input : '';
+  // Structured confirm flag (frontend can send { confirm: true }) to avoid relying on text heuristics
+  const structuredConfirm = req.body && (req.body.confirm === true || String(req.body.confirm) === 'true');
   if (!sessionId) return res.status(400).json({ error: 'Missing sessionId' });
   let session = getSession(sessionId);
   if (!session) return res.status(404).json({ error: 'Session not found' });
@@ -430,7 +432,7 @@ app.post('/api/llm', async (req, res) => {
     const userRequestedAdvance = intent.type === 'advance';
 
     // Confirmation handling
-    const isConfirm = detectConfirmation(userInput);
+    const isConfirm = structuredConfirm || detectConfirmation(userInput);
     const isDisagree = detectDisagree(userInput);
     const awaiting = session.awaitingConfirmation;
     if (awaiting && isDisagree) {
@@ -526,7 +528,7 @@ app.post('/api/llm', async (req, res) => {
     // Print whether scriptResult.prdDraft is truthy or not
     console.log('scriptResult.prdDraft is', scriptResult.prdDraft ? 'truthy' : 'falsy', '| Value:', scriptResult.prdDraft);
     // Planner decision + notes accumulation
-    const planner = scriptResult.planner || {};
+  const planner = scriptResult.planner || {};
     const target = (Array.isArray(planner.targets) && planner.targets[0]) || { sectionIndex: nextFocus.sectionIndex, fieldIndex: nextFocus.fieldIndex };
     const extractedFacts = Array.isArray(scriptResult.facts) ? scriptResult.facts : [];
     try { console.log('[FACTS]', extractedFacts.length, extractedFacts); } catch {}
@@ -581,8 +583,10 @@ app.post('/api/llm', async (req, res) => {
     const factsNow = getNotes(session, target.sectionIndex, target.fieldIndex);
     const newFactsAddedCount = Math.max(0, factsNow.length - prevCount);
 
-    // Decide assistant content (summary gate or normal reply)
-    let assistantContent = scriptResult.reply || '';
+  // Decide assistant content (summary gate or normal reply)
+  let assistantContent = scriptResult.reply || '';
+  // If we set awaitingConfirmation this turn, hold any proposed PRD draft instead of writing it to disk
+  let setAwaitingThisTurn = false;
     const firstTurnForField = prevCount === 0;
     const shouldSummarize = !session.awaitingConfirmation && !hasPendingTemp && (
       planner.action === 'summarize' || planner.action === 'confirm_gate' ||
@@ -602,6 +606,8 @@ app.post('/api/llm', async (req, res) => {
         summaryText,
         createdAt: new Date().toISOString(),
       };
+      // remember we set awaitingConfirmation this turn so we can avoid writing a temp PRD
+      setAwaitingThisTurn = true;
       session.lastSummaryAt = new Date().toISOString();
     } else if (awaiting && isConfirm && !hasPendingTemp) {
       // Clear awaiting on confirmation; drafting for this turn is already turned on
@@ -633,10 +639,40 @@ app.post('/api/llm', async (req, res) => {
     const nAccepted = normalizeMd(acceptedPrd);
     let hasPrdChanges = Boolean(nProposed && nProposed !== nAccepted);
     if (hasPendingTemp) hasPrdChanges = true;
+
+    // Flush any previously held pending draft if the user confirmed this turn
+    let flushedPending = false;
+    try {
+      if (session.pendingPrdDraft && (isConfirm || !session.awaitingConfirmation)) {
+        const pendingNorm = normalizeMd(session.pendingPrdDraft || '');
+        if (pendingNorm && pendingNorm !== nAccepted) {
+          fs.writeFileSync(tempPrdPath, session.pendingPrdDraft, 'utf-8');
+          flushedPending = true;
+        }
+        // clear the held draft after attempting to flush
+        delete session.pendingPrdDraft;
+      }
+    } catch (e) {
+      console.warn('Failed flushing pendingPrdDraft for session', sessionId, e?.message || e);
+    }
+
+    // If we have changes from this turn, either write them now or hold them if we just asked for confirmation
+    let heldPrd = false;
     if (hasPrdChanges) {
-      fs.writeFileSync(tempPrdPath, proposed, 'utf-8');
+      if (!setAwaitingThisTurn) {
+        // Normal path: write the temp PRD immediately
+        fs.writeFileSync(tempPrdPath, proposed, 'utf-8');
+      } else {
+        // We just asked for confirmation this turn — hold the proposed draft in session until user confirms
+        try {
+          session.pendingPrdDraft = proposed;
+          heldPrd = true;
+        } catch (e) {
+          console.warn('Failed to store pendingPrdDraft in session', sessionId, e?.message || e);
+        }
+      }
     } else {
-      // If identical, remove any existing temp to clear pending state
+      // If identical, remove any existing temp to clear pending state (but don't remove held pending draft)
       try { if (fs.existsSync(tempPrdPath)) fs.unlinkSync(tempPrdPath); } catch {}
     }
     // Do not update session.prdDraft automatically; only update on accept/merge
@@ -686,7 +722,16 @@ app.post('/api/llm', async (req, res) => {
         }
       }
     }
-    return res.json({ reply: scriptResult.reply, prdDraft: scriptResult.prdDraft, session, hasPrdChanges, diagnostics, demo: demoPayload });
+    return res.json({
+      reply: scriptResult.reply,
+      prdDraft: scriptResult.prdDraft,
+      session,
+      hasPrdChanges,
+      diagnostics,
+      demo: demoPayload,
+      heldPrd: Boolean(heldPrd),
+      flushedPending: Boolean(flushedPending)
+    });
   } catch (error) {
     return res.status(500).json({ error: 'LLM script error', details: error });
   }
@@ -1176,7 +1221,19 @@ app.post('/api/sessions/:id/prd/accept', (req, res) => {
   fs.writeFileSync(prdAbsPath, tempContent); // Overwrite main PRD
   session.prdDraft = tempContent;
   updateSession(req.params.id, session);
-  fs.unlinkSync(tempPath); // Delete temp file
+  // Create a timestamped snapshot of the newly accepted PRD for history/demo purposes
+  try {
+    const versionsDir = path.join(__dirname, '..', 'Documents', 'prd_versions');
+    if (!fs.existsSync(versionsDir)) fs.mkdirSync(versionsDir, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const snapName = `PRD_${req.params.id}_${ts}.md`;
+    const snapPath = path.join(versionsDir, snapName);
+    const header = `<!-- PRD snapshot for session ${req.params.id} createdAt: ${new Date().toISOString()} -->\n\n`;
+    fs.writeFileSync(snapPath, header + tempContent, 'utf-8');
+  } catch (e) {
+    console.warn('Failed to write PRD snapshot on accept for session', req.params.id, e?.message || e);
+  }
+  try { fs.unlinkSync(tempPath); } catch (e) { /* non-fatal */ }
   res.json({ ok: true });
 });
 
@@ -1231,6 +1288,18 @@ app.post('/api/sessions/:id/prd/merge', (req, res) => {
     const session = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
     session.prdDraft = mergedText;
     fs.writeFileSync(sessionFile, JSON.stringify(session, null, 2));
+  }
+  // Write a snapshot for the merged PRD version so demos can access historical versions
+  try {
+    const versionsDir = path.join(__dirname, '..', 'Documents', 'prd_versions');
+    if (!fs.existsSync(versionsDir)) fs.mkdirSync(versionsDir, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const snapName = `PRD_${sessionId}_${ts}.md`;
+    const snapPath = path.join(versionsDir, snapName);
+    const header = `<!-- PRD snapshot (merged) for session ${sessionId} createdAt: ${new Date().toISOString()} -->\n\n`;
+    fs.writeFileSync(snapPath, header + mergedText, 'utf-8');
+  } catch (e) {
+    console.warn('Failed to write PRD snapshot on merge for session', sessionId, e?.message || e);
   }
   res.json({ ok: true });
 });

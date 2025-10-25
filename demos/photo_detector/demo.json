@@ -1,4 +1,4 @@
 {
-  "title": "Photo Detector Test Demo",
-  "description": "Scripted walkthrough showing on-target vs host testing requirements for the photo detector driver."
+  "title": "Photo Detector Driver – Tests & CI (scripted)",
+  "description": "Scripted walkthrough derived from session 1761391973788: host unit tests with Unity/CMock, on-target UART harness, and CI (OpenOCD/pyOCD, UART logs, JUnit)."
 }

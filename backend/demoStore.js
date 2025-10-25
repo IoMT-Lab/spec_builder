@@ -3,7 +3,9 @@ const path = require('path');
 
 const DEMOS_DIR = path.join(__dirname, '..', 'demos');
 
-const demos = loadDemos();
+// NOTE: Previously this module loaded demos once at require time and cached them.
+// That made changes to demos/ invisible until the server restarted. To improve UX
+// (so the UI dropdown reflects current demos), we now load from disk on each call.
 
 function safeRead(filePath, fallback = '') {
   try {
@@ -62,7 +64,8 @@ function loadDemos() {
 }
 
 function listDemos() {
-  return Object.values(demos).map(d => ({
+  const registry = loadDemos();
+  return Object.values(registry).map(d => ({
     name: d.name,
     title: d.title,
     description: d.description,
@@ -71,7 +74,8 @@ function listDemos() {
 }
 
 function getDemo(name) {
-  return demos[name] || null;
+  const registry = loadDemos();
+  return registry[name] || null;
 }
 
 module.exports = {
