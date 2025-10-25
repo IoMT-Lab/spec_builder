@@ -26,7 +26,8 @@ RUN cd /app/frontend && npm install
 RUN cd /app/backend && npm install
 RUN cd /app && npm install
 
-ENV OPENAI_API_KEY=""
+# API key must be provided at runtime, not built into image
+# Users will pass this when running: docker run -e OPENAI_API_KEY=sk-... 
 
 COPY docker/docker-entrypoint.sh /
 ENTRYPOINT ["/docker-entrypoint.sh"]
