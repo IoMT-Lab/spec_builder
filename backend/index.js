@@ -454,21 +454,25 @@ app.post('/api/llm', async (req, res) => {
         const expected = demo.conversation[step];
         if (expected && expected.role === 'user' && normalizeDemoInput(expected.content) === normalizedInput) {
           let currentPrd = acceptedPrd;
-          if (demo.snapshots[step + 1]) {
-            currentPrd = demo.snapshots[step + 1];
+          const userSnapshotIdx = step; // snapshot corresponding to this user turn
+          if (demo.snapshots[userSnapshotIdx]) {
+            currentPrd = demo.snapshots[userSnapshotIdx];
             fs.writeFileSync(prdAbsPath, currentPrd);
           }
+          session.prdDraft = currentPrd;
           session.demo.step = step + 1;
           const replies = [];
           while (session.demo.step < demo.conversation.length) {
-            const entry = demo.conversation[session.demo.step];
+            const entryIdx = session.demo.step;
+            const entry = demo.conversation[entryIdx];
             if (entry.role !== 'assistant') break;
             replies.push(entry.content);
             session.conversation.push({ role: 'assistant', content: entry.content });
             session.demo.step += 1;
-            if (demo.snapshots[session.demo.step]) {
-              currentPrd = demo.snapshots[session.demo.step];
+            if (demo.snapshots[entryIdx]) {
+              currentPrd = demo.snapshots[entryIdx];
               fs.writeFileSync(prdAbsPath, currentPrd);
+              session.prdDraft = currentPrd;
             }
           }
           const replyText = replies.length ? replies.join('\n\n') : '';
@@ -838,15 +842,12 @@ app.post('/api/sessions', (req, res) => {
       prdContent = demo.snapshots[0];
     }
 
-    // Auto-play any leading assistant messages
+    // Auto-play any leading assistant messages (conversation alignment only; keep PRD at snapshot[0])
     while (session.demo.step < demo.conversation.length) {
       const entry = demo.conversation[session.demo.step];
       if (entry.role !== 'assistant') break;
       session.conversation.push({ role: 'assistant', content: entry.content });
       session.demo.step += 1;
-      if (demo.snapshots[session.demo.step]) {
-        prdContent = demo.snapshots[session.demo.step];
-      }
     }
 
     if (session.demo.step < demo.conversation.length) {
@@ -865,6 +866,7 @@ app.post('/api/sessions', (req, res) => {
 
   if (!fs.existsSync(path.dirname(prdAbsPath))) fs.mkdirSync(path.dirname(prdAbsPath), { recursive: true });
   fs.writeFileSync(prdAbsPath, prdContent);
+  session.prdDraft = prdContent;
   const conversationMarkdown = generateConversationMarkdown(session);
   fs.writeFileSync(conversationAbsPath, conversationMarkdown);
 

@@ -197,6 +197,7 @@ function App() {
       setCurrentSession(sessionData);
       if (data?.demo && data.demo.breakout === false) {
         setHasPendingChanges(false);
+        setMarkdownRefreshKey(k => k + 1);
       }
       return data;
     } finally {
@@ -363,17 +364,26 @@ function App() {
   };
 
   // Create new session
-  const handleNewSession = async () => {
+  const handleNewSession = async (maybeOptions) => {
+    const options = (maybeOptions && typeof maybeOptions === 'object' && !Array.isArray(maybeOptions) && !('nativeEvent' in maybeOptions))
+      ? maybeOptions
+      : {};
     if (creatingSession) return;
     try {
       setCreatingSession(true);
-      // Prompt for title (fallback to default if blocked/cancelled)
+      // Determine a session title (prompt by default, but reuse demo title when requested)
       let title = undefined;
-      try { title = prompt('Enter a title for the new session:'); } catch {}
+      if (options.useDemoTitle && demoMode) {
+        const selected = availableDemos.find(d => d.name === selectedDemo);
+        title = (selected?.title || selected?.name || '').trim();
+      } else {
+        try { title = prompt('Enter a title for the new session:'); } catch {}
+      }
       if (!title || !String(title).trim()) {
         const ts = new Date();
         title = `Session ${ts.getFullYear()}-${String(ts.getMonth()+1).padStart(2,'0')}-${String(ts.getDate()).padStart(2,'0')} ${String(ts.getHours()).padStart(2,'0')}:${String(ts.getMinutes()).padStart(2,'0')}`;
       }
+      title = title.trim();
 
       if (demoMode && !selectedDemo) {
         setErrorMsg('Select a demo before creating a demo session.');
@@ -508,147 +518,167 @@ function App() {
   const sidebar = (
     sidebarOpen && (
       <aside className="sidebar">
-        <div className="sidebar-header">
-          <span>Sessions</span>
-          <button
-            type="button"
-            className="new-session-btn"
-            onClick={handleNewSession}
-            disabled={creatingSession}
-            title={creatingSession ? 'Creating session…' : 'New session'}
-          >+
-          </button>
-          <button className="close-sidebar-btn" onClick={() => setSidebarOpen(false)} style={{marginLeft: 8}}>&times;</button>
+        <div className="sidebar-block sidebar-block--sessions">
+          <div className="sidebar-header">
+            <span>Sessions</span>
+            <button
+              type="button"
+              className="new-session-btn"
+              onClick={handleNewSession}
+              disabled={creatingSession}
+              title={creatingSession ? 'Creating session…' : 'New session'}
+            >+
+            </button>
+            <button className="close-sidebar-btn" onClick={() => setSidebarOpen(false)} style={{marginLeft: 8}}>&times;</button>
+          </div>
+          <ul className="session-list">
+            {sessions.map((s) => (
+              <li
+                key={s.id}
+                className={(currentSession && s.id === currentSession.id ? 'active ' : '')}
+              >
+                <span
+                  className="session-title"
+                  onMouseDown={(e)=>{ e.preventDefault(); e.stopPropagation(); setCurrentSession(s); }}
+                  onClick={() => setCurrentSession(s)}
+                >{s.title}</span>
+                <span className="session-actions">
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    aria-label="Rename session"
+                    title="Rename session"
+                    onMouseDown={(e)=>{ e.stopPropagation(); }}
+                    onClick={(e) => { e.stopPropagation();
+                      const newTitle = prompt('Rename session:', s.title);
+                      if (newTitle && newTitle !== s.title) {
+                        fetch(`/api/sessions/${s.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: newTitle }) })
+                          .then(res => res.json())
+                          .then(updated => setSessions(list => list.map(sess => sess.id === s.id ? { ...sess, title: updated.title } : sess)));
+                      }
+                    }}
+                  >
+                    <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M4 20h4l10-10-4-4L4 16v4Z"/>
+                      <path d="M14 6l4 4"/>
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    aria-label="Delete session"
+                    title="Delete session"
+                    onPointerDown={(e)=>{ e.stopPropagation(); }}
+                    onClick={(e)=>{ e.stopPropagation(); if (window.confirm('Delete this session and its PRD?')) handleDeleteSession(s.id); }}
+                  >
+                    <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M5 7h14"/>
+                      <path d="M7 7l1 12h8l1-12"/>
+                      <path d="M9 7V5h6v2"/>
+                    </svg>
+                  </button>
+                </span>
+                </li>
+            ))}
+            {/* no drag indicators */}
+          </ul>
         </div>
-        <ul className="session-list">
-          {sessions.map((s) => (
-            <li
-              key={s.id}
-              className={(currentSession && s.id === currentSession.id ? 'active ' : '')}
+
+        <div className="sidebar-block">
+          <div className="sidebar-field">
+            <label htmlFor="llm-select" className="sidebar-label">LLM Provider</label>
+            <select
+              id="llm-select"
+              className="sidebar-select"
+              value={llmProvider}
+              onChange={(e) => setLlmProvider(e.target.value)}
             >
-              <span
-                className="session-title"
-                onMouseDown={(e)=>{ e.preventDefault(); e.stopPropagation(); setCurrentSession(s); }}
-                onClick={() => setCurrentSession(s)}
-              >{s.title}</span>
-              <span className="session-actions">
-                <button
-                  type="button"
-                  className="icon-btn"
-                  aria-label="Rename session"
-                  title="Rename session"
-                  onMouseDown={(e)=>{ e.stopPropagation(); }}
-                  onClick={(e) => { e.stopPropagation();
-                    const newTitle = prompt('Rename session:', s.title);
-                    if (newTitle && newTitle !== s.title) {
-                      fetch(`/api/sessions/${s.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: newTitle }) })
-                        .then(res => res.json())
-                        .then(updated => setSessions(list => list.map(sess => sess.id === s.id ? { ...sess, title: updated.title } : sess)));
-                    }
-                  }}
-                >
-                  <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M4 20h4l10-10-4-4L4 16v4Z"/>
-                    <path d="M14 6l4 4"/>
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  className="icon-btn"
-                  aria-label="Delete session"
-                  title="Delete session"
-                  onPointerDown={(e)=>{ e.stopPropagation(); }}
-                  onClick={(e)=>{ e.stopPropagation(); if (window.confirm('Delete this session and its PRD?')) handleDeleteSession(s.id); }}
-                >
-                  <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M5 7h14"/>
-                    <path d="M7 7l1 12h8l1-12"/>
-                    <path d="M9 7V5h6v2"/>
-                  </svg>
-                </button>
-              </span>
-              </li>
-          ))}
-          {/* no drag indicators */}
-        </ul>
-        <div className="sidebar-section">
-          <label htmlFor="llm-select" className="llm-select-label">LLM:</label>
-          <select
-            id="llm-select"
-            className="llm-select"
-            value={llmProvider}
-            onChange={(e) => setLlmProvider(e.target.value)}
-          >
-            <option value="gpt5">OpenAI GPT‑5</option>
-            <option value="gemini">Google Gemini</option>
-          </select>
+              <option value="gpt5">OpenAI GPT‑5</option>
+              <option value="gemini">Google Gemini</option>
+            </select>
+          </div>
           <button
-            className="check-api-btn"
+            className="sidebar-btn"
             onClick={handleCheckApiKey}
             disabled={apiCheckLoading}
-            style={{ marginLeft: 12, marginTop: 8 }}
           >
             {apiCheckLoading ? 'Checking...' : 'Check API Key'}
           </button>
           {apiCheckResult && (
-            <div className="api-check-result" style={{ marginTop: 8 }}>{apiCheckResult}</div>
+            <div className="api-check-result sidebar-feedback">{apiCheckResult}</div>
           )}
-          <div className="demo-controls">
-            <label className="demo-toggle">
-              <input
-                type="checkbox"
-                checked={demoMode}
-                onChange={(e) => {
-                  const checked = e.target.checked;
-                  setDemoMode(checked);
-                  if (checked && !selectedDemo && availableDemos.length) {
-                    setSelectedDemo(availableDemos[0].name);
-                  }
-                }}
-              />
-              <span>Demo mode</span>
-            </label>
-            {demoMode && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <select
-                  className="demo-select"
-                  value={selectedDemo}
-                  onChange={(e) => setSelectedDemo(e.target.value)}
-                  onFocus={() => fetchDemos()}
-                >
-                  {!selectedDemo && <option value="">Select demo…</option>}
-                  {availableDemos.length === 0 && (
-                    <option value="" disabled>(No demos found)</option>
-                  )}
-                  {availableDemos.map(d => (
-                    <option key={d.name} value={d.name}>{d.title || d.name}</option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  className="check-api-btn"
-                  style={{ marginLeft: 0, marginTop: 0 }}
-                  title="Refresh list"
-                  onClick={async () => {
-                    await fetchDemos();
-                    if (!selectedDemo && availableDemos.length > 0) {
-                      setSelectedDemo(availableDemos[0].name);
-                    }
-                  }}
-                >Refresh</button>
-              </div>
-            )}
+        </div>
+
+        <div className="sidebar-block">
+          <div className="sidebar-toggle-row">
+            <input
+              id="demo-mode-toggle"
+              type="checkbox"
+              checked={demoMode}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setDemoMode(checked);
+                if (checked && !selectedDemo && availableDemos.length) {
+                  setSelectedDemo(availableDemos[0].name);
+                }
+              }}
+            />
+            <label htmlFor="demo-mode-toggle">Demo mode</label>
           </div>
+          {demoMode && (
+            <>
+              <div className="sidebar-field">
+                <label htmlFor="demo-select" className="sidebar-label">Demo scenario</label>
+                <div className="demo-picker">
+                  <select
+                    id="demo-select"
+                    className="demo-select"
+                    value={selectedDemo}
+                    onChange={(e) => setSelectedDemo(e.target.value)}
+                    onFocus={() => fetchDemos()}
+                  >
+                    {!selectedDemo && <option value="">Select demo…</option>}
+                    {availableDemos.length === 0 && (
+                      <option value="" disabled>(No demos found)</option>
+                    )}
+                    {availableDemos.map(d => (
+                      <option key={d.name} value={d.name}>{d.title || d.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="sidebar-btn sidebar-btn--compact"
+                    title="Refresh list"
+                    onClick={async () => {
+                      await fetchDemos();
+                      if (!selectedDemo && availableDemos.length > 0) {
+                        setSelectedDemo(availableDemos[0].name);
+                      }
+                    }}
+                  >Refresh</button>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="sidebar-btn"
+                title="Start selected demo session"
+                disabled={!selectedDemo || creatingSession}
+                onClick={() => handleNewSession({ useDemoTitle: true })}
+              >Start Demo</button>
+            </>
+          )}
+        </div>
+
+        <div className="sidebar-block">
           <button
-            className="check-api-btn"
+            className="sidebar-btn"
             onClick={handleRunAutodrive}
             disabled={autodriveRunning}
-            style={{ marginLeft: 12, marginTop: 12 }}
           >
             {autodriveRunning ? 'Running scenario…' : 'Auto-generate PRD'}
           </button>
           {autodriveError && (
-            <div className="api-check-result" style={{ marginTop: 8, color: '#b31d28' }}>{autodriveError}</div>
+            <div className="api-check-result sidebar-feedback" style={{ color: '#b31d28' }}>{autodriveError}</div>
           )}
         </div>
       </aside>
